@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Geoportal — Recorrido (CSV+ZIP→R2) + Loader + Visor 360 (PSV v4)</title>
+  <title>Geoportal — Recorrido (CSV+ZIP→R2) + Loader + Visor 360 (Pannellum)</title>
 
-  <!-- Preconnect al Worker (mejora TTFB de /raw) -->
+  <!-- Preconnect al Worker (mejora TTFB del proxy /raw) -->
   <link rel="preconnect" href="https://geoportal-r2-uploader.ilanbailonbruna.workers.dev" crossorigin>
 
   <!-- Leaflet -->
@@ -21,12 +21,9 @@
   <!-- JSZip (ZIP de fotos) -->
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 
-  <!-- ✅ Photo Sphere Viewer v4 (UMD) + dependencias en el ORDEN correcto -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photo-sphere-viewer@4.0.9/dist/photo-sphere-viewer.css">
-  <!-- r149 (r150+ lanza warning deprecación) -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/uevent@2.0.1/browser.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/photo-sphere-viewer@4.0.9/dist/photo-sphere-viewer.min.js"></script>
+  <!-- ✅ Pannellum (visor 360 ligero, sin Three.js) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css">
+  <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
 
   <style>
     html, body { height: 100%; margin: 0; }
@@ -75,13 +72,13 @@
     #viewer360 { right:0; width:75vw; height:calc(100vh - 60px); display:none; }
     #viewer360 .hdr { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
     #viewer360 .hdr .title { font-size:14px; font-weight:600; }
-    #psvContainer { width:100%; height:calc(100% - 40px); background:#000; border-radius:10px; overflow:hidden; }
+    #pnlmContainer { width:100%; height:calc(100% - 40px); background:#000; border-radius:10px; overflow:hidden; }
   </style>
 </head>
 <body>
   <div id="app">
     <header>
-      <div><b>Leaflet</b> + <b>Supabase</b> + <b>R2</b> · CSV+ZIP (formulario), Recorrido & Visor 360</div>
+      <div><b>Leaflet</b> + <b>Supabase</b> + <b>R2</b> · CSV+ZIP (formulario), Recorrido & Visor 360 (Pannellum)</div>
       <button id="btnOpenUploader" class="pill">📦 Subir GRUPO</button>
       <button id="btnRecorrido" class="ghost">▶ Recorrido</button>
       <button id="btnViewer" class="ghost">🕶️ 360</button>
@@ -157,7 +154,7 @@
           <button id="btnCloseViewer" class="ghost">Cerrar</button>
         </div>
       </div>
-      <div id="psvContainer"></div>
+      <div id="pnlmContainer"></div>
     </aside>
 
     <!-- Panel GALERÍA -->
@@ -395,7 +392,6 @@
         if (i % 8 === 0) setLoading(`Subiendo fotos… ${i+1}/${entries.length}`);
         const base = f.name.split('/').pop();
         const keyNorm = normKey(base);
-        if(!keyNorm){ skip++; continue; }
         const list = idsByKey.get(keyNorm) || [];
         const u = used.get(keyNorm)||0;
         const rowId = list[u];
@@ -451,56 +447,44 @@
     document.getElementById('btnNext').addEventListener('click', ()=>{ step(+1, true); });
     document.getElementById('btnPlay').addEventListener('click', ()=>{ if(playTimer) stopPlay(); else startPlay(); });
 
-    // === Visor 360 ===
-    document.getElementById('btnViewer').addEventListener('click', ()=>{ togglePanel('viewer360'); ensureViewer(); });
+    // === Visor 360 (Pannellum) ===
+    document.getElementById('btnViewer').addEventListener('click', ()=>{ togglePanel('viewer360'); openViewerPanel(); });
     document.getElementById('btnCloseViewer').addEventListener('click', ()=>{ document.getElementById('viewer360').style.display='none'; });
 
-    let psv = null;
-    function ensureViewer(){
-      if (psv) return psv;
+    let pnlm = null;
+    function openViewerPanel(){
       const panel = document.getElementById('viewer360');
-      if (getComputedStyle(panel).display === 'none') panel.style.display = 'block'; // asegurar tamaño
-      if (!window.THREE) { console.error('THREE no está disponible'); alert('Error: THREE.js no cargó. Revisa el <script>.'); return null; }
-      if (!window.PhotoSphereViewer || !PhotoSphereViewer.Viewer) { console.error('PhotoSphereViewer no está disponible'); alert('Error: PSV no cargó. Revisa orden/versión de scripts'); return null; }
-      psv = new PhotoSphereViewer.Viewer({
-        container: document.getElementById('psvContainer'),
-        navbar: ['zoom', 'fullscreen'],
-        defaultYaw: 0,
-        touchmoveTwoFingers: true,
-      });
-      return psv;
+      if (getComputedStyle(panel).display === 'none') panel.style.display = 'block';
     }
 
-    // ✅ Usar proxy /raw (+ Blob) para evitar CORS/taints y que el visor cargue sí o sí
     async function setViewerImage(rawUrl, caption){
       if(!rawUrl) return;
-      const v = ensureViewer(); if(!v) return;
 
+      // Proxy con CORS OK desde el Worker
       const base = R2_UPLOADER_URL.replace(/\/$/, '');
       const proxied = `${base}/raw?url=${encodeURIComponent(rawUrl)}`;
 
-      // (Opcional) verificación 2:1 sin bloquear
-      try {
-        const probe = new Image();
-        probe.crossOrigin = 'anonymous';
-        await new Promise((res, rej) => { probe.onload = res; probe.onerror = rej; probe.src = proxied; });
-        const ratio = probe.width / probe.height;
-        if (Math.abs(ratio - 2) > 0.06) console.warn(`La imagen no parece 2:1: ${probe.width}x${probe.height}`);
-      } catch {}
-
       document.getElementById('viewerTitle').textContent = caption || 'Visor 360';
-      document.getElementById('viewer360').style.display='block';
+      openViewerPanel();
+
+      // Recrear el visor para cargar nuevo panorama limpio
+      try { if (pnlm && pnlm.destroy) pnlm.destroy(); } catch(e) {}
+      pnlm = null;
 
       try {
-        const resp = await fetch(proxied, { cache: 'force-cache' });
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const blob = await resp.blob();
-        const objUrl = URL.createObjectURL(blob);
-
-        await v.setPanorama(objUrl); // PSV v4
-        setTimeout(() => URL.revokeObjectURL(objUrl), 20000);
+        pnlm = pannellum.viewer('pnlmContainer', {
+          type: 'equirectangular',
+          panorama: proxied,
+          autoLoad: true,
+          showZoomCtrl: true,
+          compass: false,
+          // límites de FOV razonables (mejor UX móvil)
+          hfov: 100,
+          minHfov: 50,
+          maxHfov: 120,
+        });
       } catch (err) {
-        console.error('PSV error:', err);
+        console.error('Pannellum error:', err);
         alert(
           'No se pudo cargar el 360.\n\nRevisa:\n' +
           '• CORS del bucket/worker (usa /raw)\n' +
@@ -579,7 +563,7 @@
     function detectField(obj, candidates){ const keys = Object.keys(obj||{}); for(const c of candidates){ const k = keys.find(k=>k.toLowerCase()===c.toLowerCase()); if(k) return k; } for(const c of candidates){ const k = keys.find(k=>k.toLowerCase().includes(c.toLowerCase())); if(k) return k; } return null; }
     function toNumberFlexible(v){ if (v===null || v===undefined) return NaN; if (typeof v === 'number') return v; if (typeof v !== 'string') return NaN; const s = v.trim().replace(/\s+/g,''); const s2 = s.replace(',', '.'); const n = parseFloat(s2); return Number.isFinite(n) ? n : NaN; }
     function sanitizePath(s){ return String(s||'').normalize('NFKD').replace(/[^a-zA-Z0-9_\-\/\.]+/g,'-').replace(/--+/g,'-').replace(/^-+|-+$/g,''); }
-    function esc(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;","&gt":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+    function esc(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;"," >":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 
     // === Inicio ===
     (async () => { await loadFotos(); await loadMarcaciones(); })();
