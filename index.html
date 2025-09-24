@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Geoportal — Recorrido (CSV+ZIP→R2) + Loader + Visor 360 (Pannellum)</title>
+  <title>Geoportal — Recorrido (CSV+ZIP→R2) + Loader + Visor 360 (PSV v4)</title>
 
-  <!-- Preconnect al Worker (mejora TTFB del proxy) -->
+  <!-- Preconnect al Worker (mejora TTFB de /raw) -->
   <link rel="preconnect" href="https://geoportal-r2-uploader.ilanbailonbruna.workers.dev" crossorigin>
 
   <!-- Leaflet -->
@@ -21,9 +21,12 @@
   <!-- JSZip (ZIP de fotos) -->
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 
-  <!-- ✅ Pannellum (visor 360 sin Three.js) -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css">
-  <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
+  <!-- ✅ Photo Sphere Viewer v4 (UMD) + dependencias en el ORDEN correcto -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photo-sphere-viewer@4.0.9/dist/photo-sphere-viewer.css">
+  <!-- r149 (r150+ lanza warning deprecación) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/uevent@2.0.1/browser.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/photo-sphere-viewer@4.0.9/dist/photo-sphere-viewer.min.js"></script>
 
   <style>
     html, body { height: 100%; margin: 0; }
@@ -72,13 +75,13 @@
     #viewer360 { right:0; width:75vw; height:calc(100vh - 60px); display:none; }
     #viewer360 .hdr { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
     #viewer360 .hdr .title { font-size:14px; font-weight:600; }
-    #pnlmContainer { width:100%; height:calc(100% - 40px); background:#000; border-radius:10px; overflow:hidden; }
+    #psvContainer { width:100%; height:calc(100% - 40px); background:#000; border-radius:10px; overflow:hidden; }
   </style>
 </head>
 <body>
   <div id="app">
     <header>
-      <div><b>Leaflet</b> + <b>Supabase</b> + <b>R2</b> · CSV+ZIP (formulario), Recorrido & Visor 360 (Pannellum)</div>
+      <div><b>Leaflet</b> + <b>Supabase</b> + <b>R2</b> · CSV+ZIP (formulario), Recorrido & Visor 360</div>
       <button id="btnOpenUploader" class="pill">📦 Subir GRUPO</button>
       <button id="btnRecorrido" class="ghost">▶ Recorrido</button>
       <button id="btnViewer" class="ghost">🕶️ 360</button>
@@ -139,14 +142,14 @@
         <label>Seg/pto</label>
         <input id="speed" type="number" min="0.5" step="0.5" value="2" style="width:70px" />
         <label><input type="checkbox" id="chkLine" checked /> Línea</label>
-        <label><input type="checkbox" id="chkLoop' checked /> Loop</label>
+        <label><input type="checkbox" id="chkLoop" checked /> Loop</label>
       </div>
       <div class="row">
         <div id="nowInfo" class="muted">—</div>
       </div>
     </aside>
 
-    <!-- Panel VISOR 360 -->
+    <!-- Panel VISOR 360 (75% ancho) -->
     <aside id="viewer360" class="panel">
       <div class="hdr">
         <div class="title" id="viewerTitle">Visor 360</div>
@@ -154,7 +157,7 @@
           <button id="btnCloseViewer" class="ghost">Cerrar</button>
         </div>
       </div>
-      <div id="pnlmContainer"></div>
+      <div id="psvContainer"></div>
     </aside>
 
     <!-- Panel GALERÍA -->
@@ -165,7 +168,7 @@
   </div>
 
   <script>
-    // === 1) SUPABASE ===
+    // === 1) CONEXIÓN SUPABASE ===
     const SUPABASE_URL = 'https://vupofyzkwyaejismuzfn.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cG9meXprd3lhZWppc211emZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg2MjUyOTEsImV4cCI6MjA3NDIwMTI5MX0.ITQUUW5CxLROoUiZkO5Hx-u5xtBRSF1UsSJW7RWhLZA';
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -173,7 +176,7 @@
     // === 1.1) R2 Worker URL ===
     const R2_UPLOADER_URL = 'https://geoportal-r2-uploader.ilanbailonbruna.workers.dev';
 
-    // === 2) MAPA ===
+    // === 2) MAPA + BASEMAPS ===
     const map = L.map('map', { zoomControl: true }).setView([-14.10, -70.44], 13);
     const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 21, attribution: '&copy; OpenStreetMap'});
     const sat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { maxZoom: 21, attribution: 'Imagery &copy; Google'});
@@ -193,7 +196,7 @@
     const statusEl = document.getElementById('status');
     function setStatus(t){ statusEl.textContent = t; clearTimeout(setStatus._t); setStatus._t = setTimeout(()=>statusEl.textContent='Listo', 3500); }
 
-    // Loader
+    // Loader helpers
     const loading = document.getElementById('loading');
     const loadingMsg = document.getElementById('loadingMsg');
     function showLoading(msg){ loadingMsg.textContent = msg || 'Procesando…'; loading.style.display='flex'; }
@@ -249,20 +252,15 @@
       return m;
     }
 
-    // === Datos & recorrido ===
-    let groupTracks = new Map();
-    let routeLayer = null;
+    // Datos de recorrido
+    let groupTracks = new Map(); // nombreGrupo -> [{id,numero,este,norte,...}] ordenados
+    let routeLayer = null;       // polyline del grupo activo
 
     async function loadFotos(filterText){
       setStatus('Cargando grupos…');
       for (const lg of layersByGroup.values()) lg.clearLayers();
       markerById.clear();
-
-      let q = supabase
-        .from('fotos_recorrido')
-        .select('id,numero,progresiva,codigo,este,norte,grupo,foto_url,foto_r2_key')
-        .order('id');
-
+      let q = supabase.from('fotos_recorrido').select('id,numero,progresiva,codigo,este,norte,grupo,foto_url').order('id');
       if (filterText && filterText.trim()) q = q.ilike('progresiva', `%${filterText.trim()}%`);
       const { data, error } = await q;
       if(error){ console.error(error); setStatus('Error cargando grupos'); return; }
@@ -270,14 +268,12 @@
       groupTracks = new Map();
       const bounds = L.latLngBounds();
       let count = 0;
-
       for(const row of data){
         const m = addFotoMarker(row); if(m){ bounds.extend(m.getLatLng()); count++; }
         const g = row.grupo ?? 'Sin grupo';
         if(!groupTracks.has(g)) groupTracks.set(g, []);
         groupTracks.get(g).push(row);
       }
-
       for(const [g, arr] of groupTracks){
         arr.sort((a,b)=>{
           const na = (a.numero==null?Infinity:Number(a.numero));
@@ -316,11 +312,12 @@
       setStatus(`Marcaciones cargadas: ${data.length}`);
     }
 
-    // === Formulario ===
+    // === FORMULARIO: Apertura/Cierre ===
     const uploader = document.getElementById('uploader');
     document.getElementById('btnOpenUploader').addEventListener('click', ()=>{ uploader.style.display='block'; });
     document.getElementById('btnCloseUploader').addEventListener('click', ()=>{ uploader.style.display='none'; clearForm(); });
 
+    // === FORMULARIO: Envío (CSV + ZIP) ===
     document.getElementById('groupForm').addEventListener('submit', async (e)=>{
       e.preventDefault();
       const grupo = document.getElementById('grupo').value.trim();
@@ -422,12 +419,7 @@
       const url = SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/fotos_recorrido?select=id,progresiva,codigo,numero';
       const res = await fetch(url, {
         method: 'POST',
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        },
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
         body: JSON.stringify(rows)
       });
       if(!res.ok){ const t = await res.text(); throw new Error(`Insert CSV HTTP ${res.status}: ${t}`); }
@@ -445,12 +437,7 @@
       const endpoint = SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/fotos_recorrido?id=eq.'+encodeURIComponent(rowId);
       const res = await fetch(endpoint, {
         method: 'PATCH',
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
-        },
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
         body: JSON.stringify({ foto_url: url, foto_r2_key: key })
       });
       if(!res.ok){ const t=await res.text(); throw new Error(`Update foto_url HTTP ${res.status}: ${t}`); }
@@ -464,45 +451,61 @@
     document.getElementById('btnNext').addEventListener('click', ()=>{ step(+1, true); });
     document.getElementById('btnPlay').addEventListener('click', ()=>{ if(playTimer) stopPlay(); else startPlay(); });
 
-    // === Visor 360 (Pannellum) ===
-    document.getElementById('btnViewer').addEventListener('click', ()=>{ togglePanel('viewer360'); openViewerPanel(); });
+    // === Visor 360 ===
+    document.getElementById('btnViewer').addEventListener('click', ()=>{ togglePanel('viewer360'); ensureViewer(); });
     document.getElementById('btnCloseViewer').addEventListener('click', ()=>{ document.getElementById('viewer360').style.display='none'; });
 
-    let pnlm = null;
-    function openViewerPanel(){
+    let psv = null;
+    function ensureViewer(){
+      if (psv) return psv;
       const panel = document.getElementById('viewer360');
-      if (getComputedStyle(panel).display === 'none') panel.style.display = 'block';
+      if (getComputedStyle(panel).display === 'none') panel.style.display = 'block'; // asegurar tamaño
+      if (!window.THREE) { console.error('THREE no está disponible'); alert('Error: THREE.js no cargó. Revisa el <script>.'); return null; }
+      if (!window.PhotoSphereViewer || !PhotoSphereViewer.Viewer) { console.error('PhotoSphereViewer no está disponible'); alert('Error: PSV no cargó. Revisa orden/versión de scripts'); return null; }
+      psv = new PhotoSphereViewer.Viewer({
+        container: document.getElementById('psvContainer'),
+        navbar: ['zoom', 'fullscreen'],
+        defaultYaw: 0,
+        touchmoveTwoFingers: true,
+      });
+      return psv;
     }
 
-    // Usa /raw-public/<key> si hay key; si no, /raw?url=<foto_url>
-    async function setViewerImage(rawUrl, r2key, caption){
+    // ✅ Usar proxy /raw (+ Blob) para evitar CORS/taints y que el visor cargue sí o sí
+    async function setViewerImage(rawUrl, caption){
+      if(!rawUrl) return;
+      const v = ensureViewer(); if(!v) return;
+
       const base = R2_UPLOADER_URL.replace(/\/$/, '');
-      const src = r2key
-        ? `${base}/raw-public/${encodeURIComponent(r2key)}`
-        : `${base}/raw?url=${encodeURIComponent(rawUrl)}`;
+      const proxied = `${base}/raw?url=${encodeURIComponent(rawUrl)}`;
+
+      // (Opcional) verificación 2:1 sin bloquear
+      try {
+        const probe = new Image();
+        probe.crossOrigin = 'anonymous';
+        await new Promise((res, rej) => { probe.onload = res; probe.onerror = rej; probe.src = proxied; });
+        const ratio = probe.width / probe.height;
+        if (Math.abs(ratio - 2) > 0.06) console.warn(`La imagen no parece 2:1: ${probe.width}x${probe.height}`);
+      } catch {}
 
       document.getElementById('viewerTitle').textContent = caption || 'Visor 360';
-      openViewerPanel();
-
-      try { if (pnlm && pnlm.destroy) pnlm.destroy(); } catch(e) {}
-      pnlm = null;
+      document.getElementById('viewer360').style.display='block';
 
       try {
-        pnlm = pannellum.viewer('pnlmContainer', {
-          type: 'equirectangular',
-          panorama: src,
-          autoLoad: true,
-          showZoomCtrl: true,
-          compass: false,
-          hfov: 100, minHfov: 50, maxHfov: 120
-        });
+        const resp = await fetch(proxied, { cache: 'force-cache' });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const blob = await resp.blob();
+        const objUrl = URL.createObjectURL(blob);
+
+        await v.setPanorama(objUrl); // PSV v4
+        setTimeout(() => URL.revokeObjectURL(objUrl), 20000);
       } catch (err) {
-        console.error('Pannellum error:', err);
+        console.error('PSV error:', err);
         alert(
           'No se pudo cargar el 360.\n\nRevisa:\n' +
-          '• /raw-public o /raw (CORS y 200 OK)\n' +
-          '• Relación 2:1 (equirectangular)\n' +
-          '• Peso del archivo'
+          '• CORS del bucket/worker (usa /raw)\n' +
+          '• Que la imagen sea equirectangular 2:1\n' +
+          '• Tamaño del archivo'
         );
       }
     }
@@ -527,9 +530,9 @@
       if (lastHighlight){ lastHighlight._icon?.classList.remove('pulse'); }
       if (m._icon){ m._icon.classList.add('pulse'); lastHighlight = m; }
       playIdx = i; updateNowInfo(row, i, arr.length);
-      if (row.foto_url || row.foto_r2_key){
+      if (row.foto_url){
         const cap = `#${row.numero ?? (i+1)} · ${row.progresiva || row.codigo || ''}`;
-        setViewerImage(row.foto_url, row.foto_r2_key, cap);
+        setViewerImage(row.foto_url, cap);
       }
     }
 
@@ -553,17 +556,13 @@
 
     async function renderGallery(){
       const panel = document.getElementById('gallery');
-      const { data, error } = await supabase.from('fotos_recorrido')
-        .select('id,progresiva,codigo,grupo,foto_url,foto_r2_key,numero')
-        .order('numero', { ascending: true }).limit(400);
+      const { data, error } = await supabase.from('fotos_recorrido').select('id,progresiva,codigo,grupo,foto_url,numero').not('foto_url','is',null).order('numero', { ascending: true }).limit(400);
       if(error){ panel.innerHTML = '<div class="muted">Error cargando galería</div>'; return; }
       const items = (data||[]).map(r=>{
         const label = (r.grupo? '['+r.grupo+'] ':'') + (r.progresiva||r.codigo||('id '+r.id));
         const cap = esc('#'+(r.numero??'')+' '+label);
-        const thumbSrc = r.foto_r2_key
-          ? `${R2_UPLOADER_URL.replace(/\/$/, '')}/raw-public/${encodeURIComponent(r.foto_r2_key)}`
-          : (r.foto_url || '');
-        const img = `<img class="thumb" loading="lazy" src="${esc(thumbSrc)}" alt="${cap}">`;
+        // Thumbs pueden usar URL directa (no necesitan CORS para <img>)
+        const img = `<img class="thumb" loading="lazy" src="${esc(r.foto_url||'')}" alt="${cap}">`;
         return `<div class="gallery-item">${img}<div class="muted">${cap}</div></div>`;
       });
       panel.innerHTML = `<h3>Galería (ordenada por numero)</h3>` + (items.join('') || '<div class="muted">Sin fotos</div>');
@@ -577,27 +576,10 @@
     }
 
     // === utils ===
-    function detectField(obj, candidates){
-      const keys = Object.keys(obj||{});
-      for(const c of candidates){ const k = keys.find(k=>k.toLowerCase()===c.toLowerCase()); if(k) return k; }
-      for(const c of candidates){ const k = keys.find(k=>k.toLowerCase().includes(c.toLowerCase())); if(k) return k; }
-      return null;
-    }
-    function toNumberFlexible(v){
-      if (v===null || v===undefined) return NaN;
-      if (typeof v === 'number') return v;
-      if (typeof v !== 'string') return NaN;
-      const s = v.trim().replace(/\s+/g,'');
-      const s2 = s.replace(',', '.');
-      const n = parseFloat(s2);
-      return Number.isFinite(n) ? n : NaN;
-    }
-    function sanitizePath(s){
-      return String(s||'').normalize('NFKD').replace(/[^a-zA-Z0-9_\-\/\.]+/g,'-').replace(/--+/g,'-').replace(/^-+|-+$/g,'');
-    }
-    function esc(s){
-      return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-    }
+    function detectField(obj, candidates){ const keys = Object.keys(obj||{}); for(const c of candidates){ const k = keys.find(k=>k.toLowerCase()===c.toLowerCase()); if(k) return k; } for(const c of candidates){ const k = keys.find(k=>k.toLowerCase().includes(c.toLowerCase())); if(k) return k; } return null; }
+    function toNumberFlexible(v){ if (v===null || v===undefined) return NaN; if (typeof v === 'number') return v; if (typeof v !== 'string') return NaN; const s = v.trim().replace(/\s+/g,''); const s2 = s.replace(',', '.'); const n = parseFloat(s2); return Number.isFinite(n) ? n : NaN; }
+    function sanitizePath(s){ return String(s||'').normalize('NFKD').replace(/[^a-zA-Z0-9_\-\/\.]+/g,'-').replace(/--+/g,'-').replace(/^-+|-+$/g,''); }
+    function esc(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;","&gt":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 
     // === Inicio ===
     (async () => { await loadFotos(); await loadMarcaciones(); })();
