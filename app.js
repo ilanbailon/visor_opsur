@@ -4,11 +4,11 @@ const SUPABASE_URL = 'https://vupofyzkwyaejismuzfn.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cG9meXprd3lhZWppc211emZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg2MjUyOTEsImV4cCI6MjA3NDIwMTI5MX0.ITQUUW5CxLROoUiZkO5Hx-u5xtBRSF1UsSJW7RWhLZA';
 const R2_UPLOADER_URL = 'https://geoportal-r2-uploader.ilanbailonbruna.workers.dev';
 const VIEW = { pitch: 0, yaw: 0, hfov: 108 };
-const HIDE_POINTS_ZOOM = 14; // <= este zoom oculta vértices
+const HIDE_POINTS_ZOOM = 14;
 
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-/* ====== Busy / Progreso ====== */
+/* ====== Busy / Progreso (CSV/ZIP/imagenes) ====== */
 const loading = document.getElementById('loading');
 const loadingMsg = document.getElementById('loadingMsg');
 const loadingTitle = document.getElementById('loadingTitle');
@@ -22,26 +22,26 @@ let currentBusy = { active:false, label:'', cancel:false, total:0, done:0 };
 
 function beginBusy(label, total=0){
   currentBusy = { active:true, label, cancel:false, total, done:0 };
-  loadingTitle.textContent = label || 'Procesando…';
+  if (loadingTitle) loadingTitle.textContent = label || 'Procesando…';
   loadingMsg.textContent = 'Inicializando…';
-  progressBar.style.width = total>0 ? '0%' : '0%';
-  busyText.textContent = 'Cargando…';
-  busyBadge.style.display = 'inline-flex';
+  if (progressBar) progressBar.style.width = '0%';
+  if (busyText) busyText.textContent = 'Cargando…';
+  if (busyBadge) busyBadge.style.display = 'inline-flex';
   showLoading();
 }
-function setBusyMsg(msg){ loadingMsg.textContent = msg||'Procesando…'; busyText.textContent = (currentBusy.label||'Cargando…'); }
+function setBusyMsg(msg){ loadingMsg.textContent = msg||'Procesando…'; if (busyText) busyText.textContent = (currentBusy.label||'Cargando…'); }
 function setBusyProgress(done, total, submsg){
   currentBusy.done = Math.max(0, done|0);
   currentBusy.total = Math.max(0, total|0);
   const pct = total>0 ? Math.min(100, Math.round((done/total)*100)) : 0;
-  progressBar.style.width = pct+'%';
+  if (progressBar) progressBar.style.width = pct+'%';
   loadingMsg.textContent = (submsg ? submsg+' · ' : '') + (total>0 ? `${pct}%` : '');
-  busyText.textContent = `${currentBusy.label||'Cargando'} ${pct}%`;
+  if (busyText) busyText.textContent = `${currentBusy.label||'Cargando'} ${pct}%`;
 }
-function endBusy(){ currentBusy.active=false; busyBadge.style.display='none'; hideLoading(); }
-btnCancelBusy.onclick = ()=>{ currentBusy.cancel=true; loadingMsg.textContent='Cancelando…'; };
-btnHideBusy.onclick = ()=>{ hideLoading(); };
-busyBadge.onclick = ()=>{ showLoading(); };
+function endBusy(){ currentBusy.active=false; if (busyBadge) busyBadge.style.display='none'; hideLoading(); }
+btnCancelBusy && (btnCancelBusy.onclick = ()=>{ currentBusy.cancel=true; loadingMsg.textContent='Cancelando…'; });
+btnHideBusy && (btnHideBusy.onclick = ()=>{ hideLoading(); });
+busyBadge && (busyBadge.onclick = ()=>{ showLoading(); });
 
 function showLoading(){ loading.style.display='grid'; }
 function hideLoading(){ loading.style.display='none'; }
@@ -73,6 +73,59 @@ function detectField(obj,cands){ const ks=Object.keys(obj||{}); for(const c of c
 function toNumberFlexible(v){ if(v==null) return NaN; if(typeof v==='number') return v; if(typeof v!=='string') return NaN; const n=parseFloat(v.trim().replace(/\s+/g,'').replace(',', '.')); return Number.isFinite(n)?n:NaN; }
 function sanitizePath(s){ return String(s||'').normalize('NFKD').replace(/[^a-zA-Z0-9_\-\/\.]+/g,'-').replace(/--+/g,'-').replace(/^-+|-+$/g,''); }
 
+/* ===== Loading del visor (por imagen) ===== */
+const viewerLoading = document.getElementById('viewerLoading');
+const viewerLoadingText = document.getElementById('viewerLoadingText');
+
+function showViewerLoading(msg){
+  if (!viewerLoading) return;
+  viewerLoadingText.textContent = msg || 'Cargando imagen…';
+  viewerLoading.classList.add('show');
+}
+function setViewerLoadingProgress(done, total){
+  if (!viewerLoading) return;
+  if (!total) return;
+  const pct = Math.min(100, Math.round((done/total)*100));
+  viewerLoadingText.textContent = `Cargando imagen… ${pct}%`;
+}
+function hideViewerLoading(){
+  if (!viewerLoading) return;
+  viewerLoading.classList.remove('show');
+}
+
+/* Vista vacía (sin imagen) */
+function showEmptyViewer(){
+  document.getElementById('panoContainer').style.display = 'none';
+  document.getElementById('photoContainer').classList.remove('show');
+  document.getElementById('controlsPhoto').style.display = 'none';
+  document.getElementById('controlsRun').style.display = 'none';
+  hideViewerLoading();
+}
+
+/* Descarga con progreso (si hay Content-Length) */
+async function fetchBlobWithProgress(url, onProgress){
+  const resp = await fetch(url, { cache:'force-cache' });
+  if (!resp.ok) throw new Error('HTTP '+resp.status);
+
+  if (!resp.body || !resp.body.getReader) {
+    const b = await resp.blob();
+    onProgress?.(1,1);
+    return b;
+  }
+  const reader = resp.body.getReader();
+  const total = Number(resp.headers.get('Content-Length')) || 0;
+  let received = 0;
+  const chunks = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (total && onProgress) onProgress(received, total);
+  }
+  return new Blob(chunks, { type: resp.headers.get('Content-Type') || 'application/octet-stream' });
+}
+
 /* ===== Mapa ===== */
 const map = L.map('map', { zoomControl:true }).setView([-14.10,-70.44],13);
 const hib = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{maxZoom:21, attribution:'Map data &copy; Google'}).addTo(map);
@@ -80,7 +133,7 @@ const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ma
 const sat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{maxZoom:21, attribution:'Imagery &copy; Google'});
 const dark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',{maxZoom:21, attribution:'&copy; OSM, &copy; CARTO'});
 
-/* Dos controles de capas */
+/* Controles de capas */
 const overlays = {};
 const baseControl = L.control.layers({'Google Híbrido':hib,'Google Satélite':sat,'OSM':osm,'Carto Dark':dark}, null, {
   collapsed:true, position:'topright'
@@ -157,7 +210,7 @@ let routeLayerActive = null;
 function buildSrc(row){
   const base = R2_UPLOADER_URL.replace(/\/$/,'');
   if (row?.foto_r2_key){
-    const key = String(row.foto_r2_key).replace(/^fotos\//,''); // tolera claves antiguas
+    const key = String(row.foto_r2_key).replace(/^fotos\//,'');
     return `${base}/raw-public/${encodeURI(key)}`;
   }
   if (row?.foto_url) return `${base}/raw?url=${encodeURIComponent(row.foto_url)}`;
@@ -278,7 +331,7 @@ function addMarcacionMarker(row){
     } else if (row.foto_r2_key || row.foto_url){
       await openPhotoForMarcacion(row);
     } else {
-      showPanoControlsOnly();
+      showEmptyViewer(); // sin imagen: visor vacío
     }
   });
   marcacionesCluster.addLayer(m);
@@ -348,7 +401,7 @@ function updateCountPts(){
   document.getElementById('countPts').textContent = `${obj?.rows?.length || 0} pts`;
 }
 
-/* ===== Click recorrido ===== */
+/* ===== Click recorrido (manual) ===== */
 function onRecClick(row, cm){
   const groupName = row.grupo ?? 'Sin grupo';
   const sel = document.getElementById('selGrupo');
@@ -358,7 +411,11 @@ function onRecClick(row, cm){
   if (idx !== -1) { playIdx = idx; updateNowInfo(row, idx, obj.rows.length); }
   map.panTo(cm.getLatLng());
   highlightVertex(cm);
-  open360ForRow(row, /*fallbackToPhoto=*/true);
+  if (row.foto_url || row.foto_r2_key) {
+    open360ForRow(row, /*fallbackToPhoto=*/true, /*suppress=*/false);
+  } else {
+    showEmptyViewer(); // sin imagen → visor vacío
+  }
   document.getElementById('viewerTitle').textContent = `Grupo · #${row.numero??''} ${row.progresiva||row.codigo||''}`;
 }
 
@@ -381,7 +438,6 @@ function ensurePanoViewer(){
   });
   return panoViewer;
 }
-function hidePhoto(){ document.getElementById('photoContainer').classList.remove('show'); }
 function showPhotoControls(){
   document.getElementById('controlsPhoto').style.display='flex';
   document.getElementById('controlsRun').style.display='none';
@@ -397,65 +453,114 @@ function cacheSet(map, key, val){ if(map.has(key)) map.delete(key); map.set(key,
   while(map.size > CACHE_MAX){ const k=map.keys().next().value; const u=map.get(k); map.delete(k); try{ URL.revokeObjectURL(u); }catch{} } }
 function clearCaches(){ for(const u of panoCache.values()) try{URL.revokeObjectURL(u)}catch{}; for(const u of photoCache.values()) try{URL.revokeObjectURL(u)}catch{}; panoCache.clear(); photoCache.clear(); }
 
-async function getObjUrl(row){
+/* getObjUrl con progreso */
+async function getObjUrl(row, onProgress){
   const src = buildSrc(row); if(!src) return null;
-  const resp = await fetch(src, { cache:'force-cache' });
-  if (!resp.ok) throw new Error('HTTP '+resp.status);
-  const blob = await resp.blob();
+  const blob = await fetchBlobWithProgress(src, onProgress);
   return URL.createObjectURL(blob);
 }
 
-async function open360ForRow(row, fallbackToPhoto=false){
+/* ===== Flag para ocultar overlay durante recorrido ===== */
+let suppressViewerLoading = false;
+
+/* 360 de recorrido (respeta suppress) */
+async function open360ForRow(row, fallbackToPhoto=false, suppress=false){
   try{
     showPanoControlsOnly();
+    if (!suppress) showViewerLoading('Cargando 360…');
+
     const v=ensurePanoViewer();
     const key='f:'+row.id;
     let objUrl = cacheGet(panoCache, key);
-    if(!objUrl){ objUrl = await getObjUrl(row); cacheSet(panoCache, key, objUrl); }
+    if(!objUrl){
+      objUrl = await getObjUrl(row, (d,t)=> { if (!suppress) setViewerLoadingProgress(d,t); });
+      cacheSet(panoCache, key, objUrl);
+    }
+
     const sceneId='pf_'+row.id+'_'+Date.now();
     v.addScene(sceneId,{type:'equirectangular', panorama:objUrl, autoLoad:true, pitch:VIEW.pitch, yaw:VIEW.yaw, hfov:VIEW.hfov});
+
+    const onLoad = ()=>{ if (!suppress) hideViewerLoading(); v.off('load', onLoad); };
+    v.on('load', onLoad);
+
     v.loadScene(sceneId, VIEW.pitch, VIEW.yaw, VIEW.hfov);
     requestAnimationFrame(()=> v.resize());
   }catch(e){
     console.warn('[360 grupo] fallo, fallback a foto', e);
-    if (fallbackToPhoto) { await openPhotoGeneric(row); }
+    if (!suppress) hideViewerLoading();
+    if (fallbackToPhoto) { await openPhotoGeneric(row, suppress); }
   }
 }
 
+/* 360 para marcación (SI muestra overlay) */
 async function open360ForMarcacion(row){
   try{
     showPanoControlsOnly();
+    showViewerLoading('Cargando 360…');
+
     const v=ensurePanoViewer();
     const key='m:'+row.id;
     let objUrl = cacheGet(panoCache, key);
-    if(!objUrl){ objUrl = await getObjUrl(row); cacheSet(panoCache, key, objUrl); }
+    if(!objUrl){
+      objUrl = await getObjUrl(row, (d,t)=> setViewerLoadingProgress(d,t));
+      cacheSet(panoCache, key, objUrl);
+    }
+
     const sceneId='pm_'+row.id+'_'+Date.now();
     v.addScene(sceneId,{type:'equirectangular', panorama:objUrl, autoLoad:true, pitch:VIEW.pitch, yaw:VIEW.yaw, hfov:VIEW.hfov});
+
+    const onLoad = ()=>{ hideViewerLoading(); v.off('load', onLoad); };
+    v.on('load', onLoad);
+
     v.loadScene(sceneId, VIEW.pitch, VIEW.yaw, VIEW.hfov);
     requestAnimationFrame(()=> v.resize());
   }catch(e){
     console.error('[360 marcación] fallo', e);
+    hideViewerLoading();
     await openPhotoForMarcacion(row);
   }
 }
 
-async function openPhotoGeneric(row){
+/* Fotos normales (respeta suppress) */
+async function openPhotoGeneric(row, suppress=false){
   try{
+    if (!suppress) showViewerLoading('Cargando foto…');
     const key='f:'+row.id;
     let objUrl = cacheGet(photoCache, key);
-    if(!objUrl){ objUrl = await getObjUrl(row); cacheSet(photoCache, key, objUrl); }
-    const img=document.getElementById('photoImg'); img.src=objUrl; img.style.transform='scale(1)';
+    if(!objUrl){
+      objUrl = await getObjUrl(row, (d,t)=> { if (!suppress) setViewerLoadingProgress(d,t); });
+      cacheSet(photoCache, key, objUrl);
+    }
+    const img=document.getElementById('photoImg');
+    if (!suppress) {
+      img.onload = ()=> hideViewerLoading();
+      img.onerror = ()=> hideViewerLoading();
+    }
+    img.src=objUrl; img.style.transform='scale(1)';
     showPhotoControls();
-  }catch(e){ console.error('[foto recorrido] fallo', e); }
+  }catch(e){
+    console.error('[foto recorrido] fallo', e);
+    if (!suppress) hideViewerLoading();
+  }
 }
 async function openPhotoForMarcacion(row){
   try{
+    showViewerLoading('Cargando foto…');
     const key='m:'+row.id;
     let objUrl = cacheGet(photoCache, key);
-    if(!objUrl){ objUrl = await getObjUrl(row); cacheSet(photoCache, key, objUrl); }
-    const img=document.getElementById('photoImg'); img.src=objUrl; img.style.transform='scale(1)';
+    if(!objUrl){
+      objUrl = await getObjUrl(row, (d,t)=> setViewerLoadingProgress(d,t));
+      cacheSet(photoCache, key, objUrl);
+    }
+    const img=document.getElementById('photoImg');
+    img.onload = ()=> hideViewerLoading();
+    img.onerror = ()=> hideViewerLoading();
+    img.src=objUrl; img.style.transform='scale(1)';
     showPhotoControls();
-  }catch(e){ console.error('[foto marcación] fallo', e); }
+  }catch(e){
+    console.error('[foto marcación] fallo', e);
+    hideViewerLoading();
+  }
 }
 
 /* ===== Precarga inteligente ===== */
@@ -489,6 +594,7 @@ function ensureLookahead(group, idx){
 
 /* ===== Recorrido (sin loop) ===== */
 let playTimer=null, playIdx=0;
+
 document.getElementById('btnRecorrido').onclick = async ()=>{
   if(playTimer){ stopPlay(); return; }
   const g=document.getElementById('selGrupo').value;
@@ -508,13 +614,23 @@ document.getElementById('btnPlay').onclick = async ()=>{
 
 function startPlay(){
   if(playTimer) return;
+
+  // Mensaje ligero y suprimir overlay durante el run
+  setStatus('Iniciando recorrido…');
+  suppressViewerLoading = true;
+
   showAt(playIdx, true);
   const interval = Math.max(500, Number(document.getElementById('speed').value)*1000);
   playTimer = setInterval(()=>step(+1,false), interval);
   document.getElementById('btnPlay').textContent='⏸️';
 }
 function stopPlay(){
-  if(playTimer){ clearInterval(playTimer); playTimer=null; document.getElementById('btnPlay').textContent='▶'; }
+  if(playTimer){
+    clearInterval(playTimer);
+    playTimer=null;
+    document.getElementById('btnPlay').textContent='▶';
+  }
+  suppressViewerLoading = false; // volver a mostrar overlay fuera del run
 }
 function step(delta, manual){
   const g=document.getElementById('selGrupo').value; const obj=groups.get(g)||{rows:[]}; const arr=obj.rows;
@@ -532,9 +648,10 @@ function showAt(i, openPopup){
   if(m){ map.panTo(m.getLatLng()); if (openPopup) m.openPopup(); highlightVertex(m); }
   playIdx=i; updateNowInfo(row, i, arr.length);
   if (row.foto_url || row.foto_r2_key){
-    open360ForRow(row, /*fallbackToPhoto=*/true);
+    // Durante recorrido, suppressViewerLoading=true → no mostrar overlay por imagen
+    open360ForRow(row, /*fallbackToPhoto=*/true, /*suppress=*/suppressViewerLoading);
   } else {
-    showPanoControlsOnly();
+    showEmptyViewer(); // punto sin imagen → visor vacío
   }
 }
 function updateNowInfo(row,i,total){
@@ -543,7 +660,7 @@ function updateNowInfo(row,i,total){
   el.innerHTML = `#${row.numero ?? (i+1)} · ${esc(row.progresiva || row.codigo || '')} · <span class="muted">(${i+1}/${total})</span>`;
 }
 
-/* ===== Uploader (CSV+ZIP, clave = codigo) ===== */
+/* ===== Uploader (CSV+ZIP) ===== */
 const modalUp=document.getElementById('uploaderModal');
 const openModalUp = ()=> openModal(modalUp);
 const closeModalUp = ()=> closeModal(modalUp);
@@ -603,7 +720,7 @@ async function updateFotoUrl(table,rowId,url,key){
 }
 function normKey(s){ return String(s||'').trim().toLowerCase().replace(/\.[^.]+$/, ''); }
 
-/* ====== Núcleo: subir CSV + ZIP con progreso y cancelación ====== */
+/* ====== CSV + ZIP con progreso y cancelación ====== */
 async function uploadGroupCsvAndZip(grupo, rowsCsv, zipFile){
   if (currentBusy.cancel) throw new Error('Cancelado por el usuario');
 
@@ -615,7 +732,6 @@ async function uploadGroupCsvAndZip(grupo, rowsCsv, zipFile){
   if(!latKey||!lngKey) throw new Error('No se detectaron columnas lat/lng.');
   if(!codigoKey) throw new Error('El CSV debe incluir la columna "codigo".');
 
-  // 1) Preparar filas
   const toInsert=[];
   for (const r of rowsCsv){
     const lat=toNumberFlexible(r[latKey]); const lng=toNumberFlexible(r[lngKey]);
@@ -632,7 +748,6 @@ async function uploadGroupCsvAndZip(grupo, rowsCsv, zipFile){
   await insertCsvBatchReturn(toInsert);
   if (currentBusy.cancel) throw new Error('Cancelado por el usuario');
 
-  // 2) Leer ZIP (con progreso)
   setBusyMsg('Leyendo ZIP de fotos…');
   let zipPercent = 0;
   const zip=await JSZip.loadAsync(zipFile, {
@@ -646,7 +761,6 @@ async function uploadGroupCsvAndZip(grupo, rowsCsv, zipFile){
   const entries=Object.values(zip.files).filter(f=>!f.dir);
   if(!entries.length) throw new Error('ZIP vacío');
 
-  // 3) Mapear IDs insertados por codigo (buscando por grupo recién insertado)
   const { data: insertedRows, error: insErr } = await supabase
     .from('fotos_recorrido')
     .select('id,codigo')
@@ -659,7 +773,6 @@ async function uploadGroupCsvAndZip(grupo, rowsCsv, zipFile){
   const folder=`grupos/${sanitizePath(grupo)}`;
   let ok=0, skip=0, upErr=0; const used=new Map();
 
-  // 4) Subir fotos (progreso por conteo)
   const total = entries.length;
   let done = 0;
   setBusyProgress(0, total, 'Subiendo fotos');
@@ -700,7 +813,7 @@ document.querySelectorAll('.modal .backdrop,[data-close]').forEach(el=> el.addEv
   const m = e.target.closest('.modal'); if(m) closeModal(m);
 }));
 
-/* ===== Nueva marcación (con progreso si hay imagen) ===== */
+/* ===== Nueva marcación ===== */
 const markModal=document.getElementById('markModal');
 let markMode=false;
 document.getElementById('btnMark').addEventListener('click', ()=>{
@@ -757,17 +870,17 @@ document.getElementById('markForm').addEventListener('submit', async (e)=>{
       if (tipo==='360'){ await open360ForMarcacion(row); }
       else { await openPhotoForMarcacion(row); }
     } else {
-      showPanoControlsOnly();
+      showEmptyViewer();
     }
 
     msg.textContent='✅ Marcación guardada';
     closeModal(markModal);
     markMode=false; document.getElementById('btnMark').textContent='➕ Marcar punto'; map._container.style.cursor='';
   }catch(err){ console.error(err); msg.textContent='Error: '+err.message; }
-  finally{ if (busyBadge.style.display!=='none') endBusy(); }
+  finally{ if (busyBadge && busyBadge.style.display!=='none') endBusy(); }
 });
 
-/* ===== Editar marcación (con posible nueva imagen) ===== */
+/* ===== Editar marcación ===== */
 document.getElementById('editMarkForm').addEventListener('submit', async (e)=>{
   e.preventDefault();
   const id   = Number(document.getElementById('emId').value);
@@ -829,7 +942,7 @@ document.getElementById('editMarkForm').addEventListener('submit', async (e)=>{
       if (row.tipo === '360'){ await open360ForMarcacion(row); }
       else { await openPhotoForMarcacion(row); }
     } else {
-      showPanoControlsOnly();
+      showEmptyViewer();
     }
 
   }catch(err){
@@ -863,7 +976,7 @@ document.getElementById('editRecForm').addEventListener('submit', async (e)=>{
 /* ===== Controles foto (zoom) ===== */
 let photoScale = 1;
 document.getElementById('btnZoomIn').onclick = ()=>{ photoScale=Math.min(5, photoScale+0.2); document.getElementById('photoImg').style.transform=`scale(${photoScale})`; };
-document.getElementById('btnZoomOut').onclick= ()=>{ photoScale=Math.max(0.2,photoScale-0.2); document.getElementById('photoImg').style.transform=`scale(${photoScale})`; };
+document.getElementById('btnZoomOut').onclick= ()=>{ photoScale=Math.max(0.2,photoScale-0.2); document.getElementById('photoImg').style.transform=`scale(1)`; };
 document.getElementById('btnFit').onclick   = ()=>{ photoScale=1; document.getElementById('photoImg').style.transform='scale(1)'; };
 document.getElementById('btnOpen').onclick  = ()=>{ const src=document.getElementById('photoImg').src; if(src) window.open(src,'_blank'); };
 
@@ -921,7 +1034,3 @@ document.addEventListener('click', (e)=>{ if(!e.target.closest('#searchWrap')) c
   await loadMarcaciones();
   ensurePanoViewer();
 })();
-
-/* ===== Modal helpers ===== */
-function openModal(el){ el.classList.add('show'); }
-function closeModal(el){ el.classList.remove('show'); }
