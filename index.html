@@ -1,636 +1,273 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Geoportal — Leaflet + Supabase + R2 + Pannellum (Split, Preload + Fade)</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Visor</title>
 
-<!-- Leaflet -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin></script>
+  <!-- CSS de librerías -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css" />
 
-<!-- Supabase -->
-<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-
-<!-- PapaParse + JSZip -->
-<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-
-<!-- Pannellum -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css" />
-<script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
-
-<style>
-  :root{ --left-w: 50vw; --gutter-w: 6px; --header-h: 56px; }
-  html, body { height:100%; margin:0; font-family:system-ui, Arial, sans-serif }
-  body { background:#0b1220 }
-  header{
-    height:var(--header-h); display:flex; gap:10px; align-items:center; padding:8px 12px;
-    color:#fff; background:#0f172a; border-bottom:1px solid #12203a;
-  }
-  header b{ color:#a7f3d0 }
-  button, input, select{
-    padding:6px 10px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#fff;
-  }
-  .pill{ background:#0ea5e9; color:#062e2b; border:none }
-  .ghost{ background:#0f172a; color:#fff }
-  .status{ margin-left:auto; font-size:12px; opacity:.85 }
-
-  /* Split */
-  #split { position:relative; height:calc(100vh - var(--header-h)); width:100%;
-    display:grid; grid-template-columns: var(--left-w) var(--gutter-w) 1fr; }
-  #leftPane { position:relative; overflow:hidden; background:#0b1220 }
-  #rightPane{ position:relative; overflow:hidden; background:#0a0f1f; border-left:1px solid #12203a }
-  #gutter{ background:linear-gradient(90deg,#0f172a 0,#1a2541 100%); cursor:col-resize; }
-
-  /* Mapa */
-  #map{ position:absolute; inset:0 }
-  #layersInfo{ position:absolute; top:12px; right:12px; z-index:1000;
-    background:#0f172a; color:#cbd5e1; padding:6px 10px; border-radius:10px; border:1px solid #334155; display:none; }
-
-  /* Panels flotantes del mapa */
-  aside.panel{
-    position:absolute; top:12px; left:12px; z-index:1001;
-    background:#0f172a; color:#e5e7eb; border:1px solid #334155;
-    border-radius:12px; box-shadow:0 6px 24px rgba(0,0,0,.2);
-    padding:12px; display:none; max-width:min(92vw,380px);
-  }
-  aside.panel h3{ margin:0 0 8px; font-size:14px; color:#cbd5e1 }
-  .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap }
-  .chip{ display:inline-block; padding:2px 8px; border-radius:999px; background:#1f2937; color:#cbd5e1; font-size:12px }
-  .muted{ color:#94a3b8; font-size:12px }
-  #uploader{ width:360px; }
-  #recorrido{ width:360px; transform:translateY(0); top:12px; left:12px; } /* juntas */
-
-  /* Derecha: visor 360 fijo */
-  #viewerHeader{ padding:8px 12px; display:flex; align-items:center; justify-content:space-between; color:#e5e7eb; border-bottom:1px solid #12203a }
-  #viewerTitle{ font-size:14px; font-weight:600 }
-  #panoContainer{ height:calc(100% - 46px); background:#000 }
-
-  /* Loader general */
-  #loading { position:fixed; inset:0; background:rgba(5,10,25,.55); color:#fff; display:none; align-items:center; justify-content:center; z-index:2000; }
-  #loading .box { background:#0b1220; border:1px solid #334155; padding:16px 18px; border-radius:12px; min-width:260px; text-align:center; }
-  .spinner { width:38px; height:38px; border-radius:50%; border:4px solid rgba(255,255,255,.25); border-top-color:#fff; margin:0 auto 10px; animation:spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* Resalte */
-  .pulse { box-shadow:0 0 0 rgba(14,165,233,.75); animation: pulse 1.5s infinite; border-radius:999px }
-  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(14,165,233,.7)} 70%{box-shadow:0 0 0 18px rgba(14,165,233,0)} 100%{box-shadow:0 0 0 0 rgba(14,165,233,0)} }
-
-  /* Ocultar "Loading..." de Pannellum (texto/loader internos) */
-  #panoContainer [class*="load"]{ display:none !important; }
-</style>
+  <!-- Tu CSS -->
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header>
-    <div><b>Geoportal</b> — Leaflet + Supabase + R2 + Pannellum</div>
-    <button id="btnOpenUploader" class="pill">📦 Subir GRUPO</button>
+    <div><b>Visor Operadora Sur</b></div>
+    <button id="btnOpenUploader" class="pill">📦 Subir grupo (CSV+ZIP)</button>
+    <button id="btnMark" class="ghost">➕ Marcar punto</button>
     <button id="btnRecorrido" class="ghost">▶ Recorrido</button>
-    <input id="search" type="text" placeholder="Filtrar por progresiva… (Enter)" />
+    <div id="searchWrap">
+      <input id="search" type="text" placeholder="Buscar: progresiva / nombre…" autocomplete="off" />
+      <div id="suggest"></div>
+    </div>
     <div class="status" id="status">Listo</div>
   </header>
 
   <div id="split">
-    <!-- Izquierda -->
     <section id="leftPane">
       <div id="map"></div>
       <div id="layersInfo"></div>
+    </section>
+    <div id="gutter" title="Arrastra para redimensionar"></div>
+    <section id="rightPane">
+      <div id="viewerHeader">
+        <div id="viewerTitle">Visor</div>
+        <div class="muted" id="viewerHint">Click en un punto o usa Recorrido</div>
+      </div>
 
-      <!-- Uploader -->
-      <aside id="uploader" class="panel">
-        <h3>Subir GRUPO (CSV + ZIP → R2)</h3>
-        <form id="groupForm">
-          <div class="mb-3">
-            <div class="muted">Nombre del grupo</div>
-            <input type="text" id="grupo" placeholder="Recorrido 2025-09-24" required>
-          </div>
-          <div class="mb-3">
-            <div class="muted">Campo clave (para fotos)</div>
-            <select id="keyField" required>
-              <option value="codigo">codigo</option>
-              <option value="progresiva">progresiva</option>
-            </select>
-          </div>
-          <div class="mb-3">
-            <div class="muted">Archivo CSV</div>
-            <input type="file" id="csvFile" accept=".csv,text/csv" required>
-          </div>
-          <div class="mb-3">
-            <div class="muted">Archivo ZIP de fotos</div>
-            <input type="file" id="zipFile" accept=".zip,application/zip" required>
-          </div>
-          <div class="row">
-            <button type="button" id="btnCloseUploader" class="ghost">Cerrar</button>
-            <button type="submit" class="pill">Subir</button>
-          </div>
-        </form>
-        <div id="uploaderMsg" class="muted" style="margin-top:6px"></div>
-      </aside>
-
-      <!-- Recorrido -->
-      <aside id="recorrido" class="panel" style="margin-top:12px; left:12px;">
-        <h3>Recorrido por <code>numero</code></h3>
-        <div class="row" style="margin-bottom:8px">
+      <!-- Controles para RECORRIDO / 360 -->
+      <div id="controlsRun">
+        <div class="row">
           <label>Grupo</label>
           <select id="selGrupo"></select>
           <span class="chip" id="countPts">0 pts</span>
         </div>
-        <div class="row" style="margin-bottom:8px">
+        <div class="row">
           <button id="btnPrev">⏮️</button>
           <button id="btnPlay">▶</button>
           <button id="btnNext">⏭️</button>
           <label>Seg/pto</label>
-          <input id="speed" type="number" min="0.5" step="0.5" value="2" style="width:70px" />
-          <label><input type="checkbox" id="chkLine" checked /> Línea</label>
-          <label><input type="checkbox" id="chkLoop" checked /> Loop</label>
+          <input id="speed" type="number" min="0.5" step="0.5" value="1.5" style="width:70px" />
         </div>
-        <div class="row" style="margin-bottom:8px">
-          <button id="btnPreload" class="pill">⚡ Precargar grupo</button>
-          <span id="preloadStatus" class="muted">—</span>
-        </div>
-        <div class="row">
-          <div id="nowInfo" class="muted">—</div>
-        </div>
-      </aside>
-    </section>
-
-    <!-- Separador -->
-    <div id="gutter" title="Arrastra para redimensionar"></div>
-
-    <!-- Derecha: visor 360 -->
-    <section id="rightPane">
-      <div id="viewerHeader">
-        <div id="viewerTitle">Visor 360</div>
-        <div class="muted" id="viewerHint">Haz click en un punto o usa Recorrido</div>
+        <div class="row"><span class="muted" id="nowInfo">—</span></div>
       </div>
-      <div id="panoContainer"></div>
+
+      <!-- Controles para FOTO normal -->
+      <div id="controlsPhoto" style="display:none">
+        <div class="row">
+          <button id="btnZoomIn">＋</button>
+          <button id="btnZoomOut">－</button>
+          <button id="btnFit">Ajustar</button>
+          <button id="btnOpen">Abrir</button>
+        </div>
+        <div class="row"><span class="muted">Mostrando imagen no-360</span></div>
+      </div>
+
+      <div id="viewerArea">
+        <div id="panoContainer"></div>
+        <div id="photoContainer"><img id="photoImg" alt="foto" /></div>
+      </div>
     </section>
   </div>
 
-  <!-- Loader general -->
-  <div id="loading"><div class="box">
-    <div class="spinner"></div><div id="loadingMsg">Procesando…</div>
-  </div></div>
+  <!-- Badge mini de progreso -->
+  <button id="busyBadge" title="Ver detalle de carga">
+    <span class="dot"></span><span id="busyText">Cargando…</span>
+  </button>
 
-<script>
-  if (location.protocol === 'file:') alert('⚠️ Abre con http://localhost (python -m http.server o Live Server).');
+  <!-- Loader / Overlay con progreso -->
+  <div id="loading" aria-hidden="true">
+    <div class="back"></div>
+    <div class="box">
+      <div><span class="spinner"></span><b id="loadingTitle">Procesando…</b></div>
+      <div id="loadingMsg">Inicializando…</div>
+      <div class="progressWrap" aria-hidden="false">
+        <div class="progressBar" id="progressBar" style="width:0%"></div>
+      </div>
+      <div class="loading-actions">
+        <button id="btnCancelBusy" class="btn-cancel">Cancelar</button>
+        <button id="btnHideBusy" class="ghost">Ocultar</button>
+      </div>
+    </div>
+  </div>
 
-  // ===== CONFIG =====
-  const SUPABASE_URL = 'https://vupofyzkwyaejismuzfn.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cG9meXprd3lhZWppc211emZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg2MjUyOTEsImV4cCI6MjA3NDIwMTI5MX0.ITQUUW5CxLROoUiZkO5Hx-u5xtBRSF1UsSJW7RWhLZA';
-  const R2_UPLOADER_URL = 'https://geoportal-r2-uploader.ilanbailonbruna.workers.dev';
+  <!-- Uploader modal -->
+  <div id="uploaderModal" class="modal" aria-hidden="true">
+    <div class="backdrop" data-close></div>
+    <div class="content">
+      <h3>Subir GRUPO (CSV + ZIP → R2)</h3>
+      <form id="groupForm">
+        <div class="form-row">
+          <div>
+            <div class="muted">Nombre del grupo</div>
+            <input type="text" id="grupo" placeholder="Recorrido AAAA-MM-DD" required>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <div class="muted">CSV (debe incluir <code>codigo</code>)</div>
+            <input type="file" id="csvFile" accept=".csv,text/csv" required>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <div class="muted">ZIP de fotos</div>
+            <input type="file" id="zipFile" accept=".zip,application/zip" required>
+          </div>
+        </div>
+        <div class="actions">
+          <button type="button" class="ghost" data-close>Cancelar</button>
+          <button type="submit" class="pill">Subir</button>
+        </div>
+      </form>
+      <div id="uploaderMsg" class="muted" style="margin-top:6px"></div>
+    </div>
+  </div>
 
-  // Vista inicial 360
-  const VIEW = { pitch: 0, yaw: 0, hfov: 108 }; // 100–115 recomendado
+  <!-- Modal nueva marcación -->
+  <div id="markModal" class="modal" aria-hidden="true">
+    <div class="backdrop" data-close></div>
+    <div class="content">
+      <h3>Nueva marcación</h3>
+      <form id="markForm">
+        <div class="form-row cols-2">
+          <div>
+            <div class="muted">Nombre *</div>
+            <input type="text" id="mNombre" required>
+          </div>
+          <div>
+            <div class="muted">Tipo de imagen</div>
+            <select id="mTipo">
+              <option value="">Sin imagen</option>
+              <option value="foto">Foto normal</option>
+              <option value="360">Foto 360</option>
+            </select>
+          </div>
+        </div>
 
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        <div class="form-row">
+          <div>
+            <div class="muted">Imagen (opcional)</div>
+            <input type="file" id="mFile" accept="image/*">
+          </div>
+        </div>
 
-  // ===== Split arrastrable =====
-  (function(){
-    const gutter = document.getElementById('gutter');
-    let dragging = false;
-    gutter.addEventListener('mousedown', ()=> dragging=true);
-    window.addEventListener('mouseup', ()=> dragging=false);
-    window.addEventListener('mousemove', (e)=>{
-      if(!dragging) return;
-      const min = 220; const max = window.innerWidth - 320;
-      const x = Math.min(Math.max(e.clientX, min), max);
-      document.documentElement.style.setProperty('--left-w', x + 'px');
-      localStorage.setItem('split-left', String(x));
-      map.invalidateSize(); panoViewer?.resize?.();
-    });
-    const saved = Number(localStorage.getItem('split-left'));
-    if (saved && saved>200 && saved < window.innerWidth-200) {
-      document.documentElement.style.setProperty('--left-w', saved+'px');
-      setTimeout(()=>{ map.invalidateSize(); panoViewer?.resize?.(); }, 200);
-    }
-  })();
+        <div class="form-row cols-2">
+          <div>
+            <div class="muted">Lat *</div>
+            <input type="number" id="mLat" required step="any">
+          </div>
+          <div>
+            <div class="muted">Lng *</div>
+            <input type="number" id="mLng" required step="any">
+          </div>
+        </div>
 
-  // ===== UI helpers =====
-  const statusEl = document.getElementById('status');
-  function setStatus(t){ statusEl.textContent = t; clearTimeout(setStatus._t); setStatus._t=setTimeout(()=>statusEl.textContent='Listo',3000); }
-  const loading = document.getElementById('loading'), loadingMsg=document.getElementById('loadingMsg');
-  function showLoading(msg){ loadingMsg.textContent=msg||'Procesando…'; loading.style.display='flex'; }
-  function setLoading(msg){ loadingMsg.textContent=msg||'Procesando…'; }
-  function hideLoading(){ loading.style.display='none'; }
+        <div class="form-row">
+          <div>
+            <div class="muted">Descripción</div>
+            <textarea id="mDesc" placeholder="Opcional"></textarea>
+          </div>
+        </div>
 
-  // ===== MAPA =====
-  const map = L.map('map', { zoomControl:true }).setView([-14.10,-70.44],13);
-  const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:21, attribution:'&copy; OpenStreetMap'}).addTo(map);
-  const hib = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{maxZoom:21, attribution:'Map data &copy; Google'});
-  const sat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{maxZoom:21, attribution:'Imagery &copy; Google'});
-  const dark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',{maxZoom:21, attribution:'&copy; OSM, &copy; CARTO'});
-  const baseLayers = {'OSM':osm, 'Google Híbrido':hib, 'Google Satélite':sat, 'Carto Dark':dark};
-  const overlays = {};
-  const layersControl = L.control.layers(baseLayers, overlays, {collapsed:false}).addTo(map);
+        <div class="actions">
+          <button type="button" class="ghost" data-close>Cancelar</button>
+          <button type="submit" class="pill">Guardar</button>
+        </div>
+      </form>
+      <div id="markMsg" class="muted" style="margin-top:6px"></div>
+    </div>
+  </div>
 
-  const layersByGroup = new Map();
-  const markerById = new Map();
-  let groupTracks = new Map();
-  let routeLayer = null;
+  <!-- Modal editar marcación -->
+  <div id="editMarkModal" class="modal" aria-hidden="true">
+    <div class="backdrop" data-close></div>
+    <div class="content">
+      <h3>Editar marcación</h3>
+      <form id="editMarkForm">
+        <input type="hidden" id="emId">
 
-  function ensureGroupLayer(grupo){
-    const name = grupo ?? 'Sin grupo';
-    if(!layersByGroup.has(name)){
-      const lg = L.layerGroup().addTo(map);
-      layersByGroup.set(name, lg);
-      overlays[name] = lg;
-      layersControl.addOverlay(lg, name);
-      updateLayersInfo();
-    }
-    return layersByGroup.get(name);
-  }
-  function updateLayersInfo(){
-    const el = document.getElementById('layersInfo');
-    const names = Array.from(layersByGroup.keys());
-    if(!names.length){ el.style.display='none'; return; }
-    el.style.display='block';
-    el.textContent='Capas: '+names.join(', ');
-  }
+        <div class="form-row cols-2">
+          <div>
+            <div class="muted">Nombre *</div>
+            <input type="text" id="emNombre" required>
+          </div>
+          <div>
+            <div class="muted">Tipo de imagen</div>
+            <select id="emTipo">
+              <option value="">Sin imagen</option>
+              <option value="foto">Foto normal</option>
+              <option value="360">Foto 360</option>
+            </select>
+          </div>
+        </div>
 
-  function addFotoMarker(row){
-    const lat = Number(row.norte ?? row.lat), lng = Number(row.este ?? row.lng);
-    if(!Number.isFinite(lat)||!Number.isFinite(lng)) return;
-    const lg = ensureGroupLayer(row.grupo);
-    const m = L.marker([lat,lng]).addTo(lg).bindPopup(
-      `<b>${esc(row.progresiva ?? row.codigo ?? 'Sin etiqueta')}</b><br>`+
-      `<small>#${row.numero ?? '-'} · Grupo: ${esc(row.grupo ?? 'Sin grupo')} · id:${row.id}</small>`
-    );
-    m.on('click', ()=> open360ForRow(row));
-    markerById.set(row.id, m);
-    return m;
-  }
+        <div class="form-row">
+          <div>
+            <div class="muted">Imagen actual</div>
+            <div id="emPreview" class="muted">—</div>
+          </div>
+        </div>
 
-  // Marcaciones
-  const marcacionesLayer = L.layerGroup().addTo(map);
-  overlays['Marcaciones'] = marcacionesLayer;
-  async function loadMarcaciones(){
-    const { data, error } = await supabase.from('marcaciones').select('id,nombre,descripcion,lat,lng').order('id');
-    if(error) { console.error(error); return; }
-    marcacionesLayer.clearLayers();
-    for (const r of (data||[])) {
-      if (!Number.isFinite(Number(r.lat))||!Number.isFinite(Number(r.lng))) continue;
-      L.marker([Number(r.lat), Number(r.lng)])
-        .addTo(marcacionesLayer)
-        .bindPopup(`<b>${esc(r.nombre||'Sin nombre')}</b>${r.descripcion?'<br>'+esc(r.descripcion):''}`);
-    }
-  }
+        <div class="form-row">
+          <div>
+            <div class="muted">Nueva imagen (opcional)</div>
+            <input type="file" id="emFile" accept="image/*">
+            <label style="display:flex;gap:6px;align-items:center;margin-top:6px;">
+              <input type="checkbox" id="emRemove"> Eliminar imagen actual
+            </label>
+          </div>
+        </div>
 
-  // ===== Datos =====
-  let rows = [];
-  async function loadFotos(filterText){
-    setStatus('Cargando puntos…');
-    for (const lg of layersByGroup.values()) lg.clearLayers();
-    markerById.clear();
+        <div class="form-row">
+          <div>
+            <div class="muted">Descripción</div>
+            <textarea id="emDesc"></textarea>
+          </div>
+        </div>
 
-    let q = supabase.from('fotos_recorrido')
-      .select('id,numero,progresiva,codigo,este,norte,grupo,foto_url,foto_r2_key')
-      .order('id');
-    if (filterText?.trim()) q = q.ilike('progresiva', `%${filterText.trim()}%`);
-    const { data, error } = await q;
-    if (error){ console.error(error); setStatus('Error'); return; }
-    rows = data||[];
+        <div class="actions">
+          <button type="button" class="ghost" data-close>Cancelar</button>
+          <button type="submit" class="pill">Guardar</button>
+        </div>
+      </form>
+      <div id="editMarkMsg" class="muted" style="margin-top:6px"></div>
+    </div>
+  </div>
 
-    groupTracks = new Map();
-    const bounds = L.latLngBounds();
-    let count = 0;
+  <!-- Modal editar recorrido -->
+  <div id="editRecModal" class="modal" aria-hidden="true">
+    <div class="backdrop" data-close></div>
+    <div class="content">
+      <h3>Editar punto de recorrido</h3>
+      <form id="editRecForm">
+        <input type="hidden" id="erId">
+        <div class="form-row cols-2">
+          <div><div class="muted">Progresiva</div><input type="text" id="erProg"></div>
+          <div><div class="muted">Descripción</div><input type="text" id="erDesc" placeholder="Opcional"></div>
+        </div>
+        <div class="actions">
+          <button type="button" class="ghost" data-close>Cancelar</button>
+          <button type="submit" class="pill">Guardar</button>
+        </div>
+      </form>
+      <div id="editRecMsg" class="muted" style="margin-top:6px"></div>
+    </div>
+  </div>
 
-    for (const r of rows){
-      const m = addFotoMarker(r);
-      if (m){ bounds.extend(m.getLatLng()); count++; }
-      const g = r.grupo ?? 'Sin grupo';
-      if(!groupTracks.has(g)) groupTracks.set(g, []);
-      groupTracks.get(g).push(r);
-    }
-    for(const [g, arr] of groupTracks){
-      arr.sort((a,b)=>{
-        const na = (a.numero==null?Infinity:Number(a.numero));
-        const nb = (b.numero==null?Infinity:Number(b.numero));
-        if (Number.isFinite(na) && Number.isFinite(nb) && na!==nb) return na-nb;
-        return a.id-b.id;
-      });
-    }
-    // select grupo
-    const sel = document.getElementById('selGrupo');
-    sel.innerHTML='';
-    for (const g of groupTracks.keys()){
-      const opt=document.createElement('option'); opt.value=g; opt.textContent=g; sel.appendChild(opt);
-    }
-    if (sel.options.length) sel.value = sel.options[0].value;
-    updateCountPts();
+  <!-- JS de librerías -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
 
-    if (count>0) map.fitBounds(bounds.pad(0.2));
-    setStatus(`Cargados ${count} puntos`);
-
-    // limpia cache de panos (por si cambiaste dataset)
-    clearPanoCache();
-  }
-
-  function updateCountPts(){
-    const g = document.getElementById('selGrupo').value;
-    const n = groupTracks.get(g)?.length || 0;
-    document.getElementById('countPts').textContent = `${n} pts`;
-  }
-
-  // Búsqueda
-  document.getElementById('search').addEventListener('keydown', (e)=>{ if(e.key==='Enter') loadFotos(e.target.value); });
-
-  // ===== Uploader =====
-  const uploader = document.getElementById('uploader');
-  document.getElementById('btnOpenUploader').onclick = ()=> uploader.style.display='block';
-  document.getElementById('btnCloseUploader').onclick = ()=> uploader.style.display='none';
-
-  document.getElementById('groupForm').addEventListener('submit', async (e)=>{
-    e.preventDefault();
-    const grupo = document.getElementById('grupo').value.trim();
-    const keyField = document.getElementById('keyField').value.trim();
-    const csvFile = document.getElementById('csvFile').files[0];
-    const zipFile = document.getElementById('zipFile').files[0];
-    const msg = document.getElementById('uploaderMsg');
-    msg.textContent='';
-    if(!grupo||!keyField||!csvFile||!zipFile){ msg.textContent='Completa todos los campos.'; return; }
-    try{
-      showLoading('Leyendo CSV…');
-      const parsed = await new Promise((resolve, reject)=>{ Papa.parse(csvFile, { header:true, skipEmptyLines:'greedy', encoding:'UTF-8', complete: resolve, error: reject }); });
-      if(!parsed?.data?.length) throw new Error('CSV vacío o sin encabezados');
-      setLoading('Preparando registros…');
-      await uploadGroupCsvAndZip(grupo, keyField, parsed.data, zipFile);
-      setLoading('Actualizando…');
-      await loadFotos();
-      hideLoading();
-      msg.textContent='✅ Grupo cargado correctamente';
-      uploader.style.display='none';
-    }catch(err){ console.error(err); hideLoading(); msg.textContent='Error: '+err.message; }
-  });
-
-  function normKey(s){ return String(s||'').trim().toLowerCase().replace(/\.[^.]+$/, ''); }
-  function detectField(obj, candidates){ const keys=Object.keys(obj||{}); for(const c of candidates){ const k=keys.find(k=>k.toLowerCase()===c.toLowerCase()); if(k) return k; } for(const c of candidates){ const k=keys.find(k=>k.toLowerCase().includes(c.toLowerCase())); if(k) return k; } return null; }
-  function toNumberFlexible(v){ if (v===null||v===undefined) return NaN; if (typeof v==='number') return v; if (typeof v!=='string') return NaN; const s=v.trim().replace(/\s+/g,''); const s2=s.replace(',', '.'); const n=parseFloat(s2); return Number.isFinite(n)?n:NaN; }
-  function sanitizePath(s){ return String(s||'').normalize('NFKD').replace(/[^a-zA-Z0-9_\-\/\.]+/g,'-').replace(/--+/g,'-').replace(/^-+|-+$/g,''); }
-  function esc(s){ return String(s??'').replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
-
-  async function insertCsvBatchReturn(rows){
-    const url = SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/fotos_recorrido?select=id,progresiva,codigo,numero';
-    const res = await fetch(url, {
-      method:'POST',
-      headers:{ 'apikey':SUPABASE_ANON_KEY, 'Authorization':`Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type':'application/json', 'Prefer':'return=representation' },
-      body: JSON.stringify(rows)
-    });
-    if(!res.ok){ const t=await res.text(); throw new Error(`Insert CSV HTTP ${res.status}: ${t}`); }
-    return res.json();
-  }
-
-  async function uploadToR2(workerUrl, keyPath, file){
-    const form = new FormData(); form.append('key', keyPath); form.append('file', file, file.name||'file');
-    const res = await fetch(workerUrl.replace(/\/$/, '') + '/upload', { method:'POST', body:form });
-    if(!res.ok){ const t=await res.text(); throw new Error(`R2 upload HTTP ${res.status}: ${t}`); }
-    return res.json(); // { url, key }
-  }
-
-  async function updateFotoUrl(rowId, url, key){
-    const endpoint = SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/fotos_recorrido?id=eq.'+encodeURIComponent(rowId);
-    const res = await fetch(endpoint, {
-      method:'PATCH',
-      headers:{ 'apikey':SUPABASE_ANON_KEY, 'Authorization':`Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type':'application/json', 'Prefer':'return=minimal' },
-      body: JSON.stringify({ foto_url:url, foto_r2_key:key })
-    });
-    if(!res.ok){ const t=await res.text(); throw new Error(`Update foto_url HTTP ${res.status}: ${t}`); }
-  }
-
-  async function uploadGroupCsvAndZip(grupo, keyField, rowsCsv, zipFile){
-    const latKey = detectField(rowsCsv[0], ['y','norte','lat','latitude','latitud']);
-    const lngKey = detectField(rowsCsv[0], ['x','este','lng','lon','long','longitud']);
-    const progKey = detectField(rowsCsv[0], ['progresiva','pk','progr']);
-    const codeKey = detectField(rowsCsv[0], ['codigo','code','filename','foto','image']);
-    const numKey  = detectField(rowsCsv[0], ['numero','orden','order','seq','indice','index']);
-    if(!latKey || !lngKey) throw new Error('No se detectaron columnas lat/lng (x/y).');
-
-    const toInsert = [];
-    for (const r of rowsCsv){
-      const lat = toNumberFlexible(r[latKey]); const lng = toNumberFlexible(r[lngKey]);
-      if(!Number.isFinite(lat)||!Number.isFinite(lng)||lat<-90||lat>90||lng<-180||lng>180) continue;
-      const ewkt = `SRID=4326;POINT(${lng} ${lat})`;
-      const item = { geom: ewkt, este: lng, norte: lat, grupo };
-      if (progKey && r[progKey] != null && r[progKey] !== '') item.progresiva = String(r[progKey]);
-      if (codeKey && r[codeKey] != null && r[codeKey] !== '') item.codigo = String(r[codeKey]);
-      if (numKey  && r[numKey]  != null && r[numKey]  !== '') item.numero = Number(r[numKey]);
-      toInsert.push(item);
-    }
-    if(!toInsert.length) throw new Error('No hay filas válidas para insertar.');
-
-    setLoading(`Insertando ${toInsert.length} puntos…`);
-    const inserted = await insertCsvBatchReturn(toInsert);
-
-    const effectiveKey = keyField || (codeKey || progKey);
-    const idsByKey = new Map();
-    for(const row of inserted){
-      const k = normKey(row[effectiveKey] ?? row.codigo ?? row.progresiva);
-      if(!k) continue; if(!idsByKey.has(k)) idsByKey.set(k, []); idsByKey.get(k).push(row.id);
-    }
-
-    setLoading('Leyendo ZIP de fotos…');
-    const zip = await JSZip.loadAsync(zipFile);
-    const entries = Object.values(zip.files).filter(f=>!f.dir);
-    if(!entries.length) throw new Error('ZIP vacío');
-    const folder = `grupos/${sanitizePath(grupo)}`;
-    let ok=0, skip=0, upErr=0; const used = new Map();
-
-    for(let i=0;i<entries.length;i++){
-      const f = entries[i];
-      if (i % 8 === 0) setLoading(`Subiendo fotos… ${i+1}/${entries.length}`);
-      const base = f.name.split('/').pop();
-      const keyNorm = normKey(base);
-      if(!keyNorm){ skip++; continue; }
-      const list = idsByKey.get(keyNorm) || [];
-      const u = used.get(keyNorm)||0;
-      const rowId = list[u];
-      if(!rowId){ skip++; continue; }
-
-      const blob = await f.async('blob');
-      const ext = (base.match(/\.[^.]+$/)?.[0] || '.jpg').toLowerCase();
-      const keyPath = `${folder}/${rowId}_${Date.now()}${ext}`;
-      try{
-        const fileForForm = new File([blob], base, { type: blob.type||'image/jpeg' });
-        const { url, key } = await uploadToR2(R2_UPLOADER_URL, keyPath, fileForForm);
-        await updateFotoUrl(rowId, url, key);
-        used.set(keyNorm, u+1);
-        ok++;
-      }catch(e){ upErr++; }
-    }
-    setLoading(`ZIP → vinculadas: ${ok} · sin match: ${skip} · errores: ${upErr}`);
-  }
-
-  // ===== Recorrido =====
-  let playTimer=null, playIdx=0, lastHighlight=null;
-  document.getElementById('btnRecorrido').onclick = ()=>{ togglePanel('recorrido'); drawRoute(); };
-  document.getElementById('selGrupo').addEventListener('change', ()=>{ stopPlay(); drawRoute(); updateCountPts(); playIdx=0; updateNowInfo(); clearPanoCache(); });
-  document.getElementById('btnPrev').onclick = ()=> step(-1, true);
-  document.getElementById('btnNext').onclick = ()=> step(+1, true);
-  document.getElementById('btnPlay').onclick = async ()=>{ 
-    const g = document.getElementById('selGrupo').value; 
-    if(!preloadedGroups.has(g)) preloadGroup(g, {silent:true}); // precarga en fondo
-    if(playTimer) stopPlay(); else startPlay(); 
-  };
-  document.getElementById('btnPreload').onclick = ()=> {
-    const g = document.getElementById('selGrupo').value;
-    preloadGroup(g, {silent:false});
-  };
-
-  function togglePanel(id){
-    const el = document.getElementById(id);
-    el.style.display = (el.style.display==='block') ? 'none' : 'block';
-  }
-
-  function startPlay(){ if(playTimer) return; showAt(playIdx, true); const interval = Math.max(500, Number(document.getElementById('speed').value)*1000); playTimer=setInterval(()=>step(+1,false), interval); document.getElementById('btnPlay').textContent='⏸️'; }
-  function stopPlay(){ if(playTimer){ clearInterval(playTimer); playTimer=null; document.getElementById('btnPlay').textContent='▶'; } }
-  function step(delta, manual){
-    const g = document.getElementById('selGrupo').value; const arr = groupTracks.get(g)||[];
-    if(!arr.length){ stopPlay(); return; }
-    playIdx += delta;
-    if (playIdx >= arr.length){ if(document.getElementById('chkLoop').checked){ playIdx=0; } else { stopPlay(); playIdx = arr.length-1; } }
-    if (playIdx < 0){ if(document.getElementById('chkLoop').checked){ playIdx=arr.length-1; } else { playIdx=0; } }
-    showAt(playIdx, manual);
-    preloadAhead(g, playIdx, 3); // lookahead
-  }
-  function showAt(i, openPopup){
-    const g = document.getElementById('selGrupo').value; const arr = groupTracks.get(g)||[]; if(!arr.length) return;
-    const row = arr[i]; if(!row) return; const m = markerById.get(row.id); if(!m) return;
-    map.panTo(m.getLatLng());
-    if (openPopup) m.openPopup();
-    if (lastHighlight){ lastHighlight._icon?.classList.remove('pulse'); }
-    if (m._icon){ m._icon.classList.add('pulse'); lastHighlight=m; }
-    playIdx=i; updateNowInfo(row, i, arr.length);
-    if (row.foto_url || row.foto_r2_key) open360ForRow(row);
-  }
-  function updateNowInfo(row, i, total){
-    const el=document.getElementById('nowInfo');
-    if(!row){ el.textContent='—'; return; }
-    el.innerHTML = `#${row.numero ?? (i+1)} · ${esc(row.progresiva || row.codigo || '')} · <span class="muted">(${i+1}/${total})</span>`;
-  }
-  function drawRoute(){
-    if(routeLayer){ routeLayer.remove(); routeLayer=null; }
-    if(!document.getElementById('chkLine').checked) return;
-    const g = document.getElementById('selGrupo').value; const arr=groupTracks.get(g)||[]; if(!arr.length) return;
-    const latlngs = arr.map(r=>[Number(r.norte), Number(r.este)]).filter(([a,b])=>Number.isFinite(a)&&Number.isFinite(b));
-    if(latlngs.length>=2){ routeLayer=L.polyline(latlngs,{weight:3,opacity:.9,color:'#38bdf8'}).addTo(map); map.fitBounds(routeLayer.getBounds().pad(0.2)); }
-  }
-
-  // ===== Pannellum =====
-  let panoViewer=null;
-  function ensurePanoViewer(){
-    if (panoViewer) return panoViewer;
-    panoViewer = pannellum.viewer('panoContainer', {
-      default: {
-        firstScene:'boot',
-        autoLoad:true,
-        sceneFadeDuration: 600,      // 👈 desvanecimiento entre escenas
-        strings: { loadingLabel: "", loadButtonLabel: "" } // 👈 sin "Loading…"
-      },
-      scenes: {
-        boot: {
-          type:'equirectangular',
-          panorama:'data:image/gif;base64,R0lGODlhAQABAAAAACw=',
-          autoLoad:true,
-          pitch: VIEW.pitch, yaw: VIEW.yaw, hfov: VIEW.hfov
-        }
-      },
-      showZoomCtrl:true
-    });
-    return panoViewer;
-  }
-  function buildSrc(row){
-    const base = R2_UPLOADER_URL.replace(/\/$/,'');
-    if (row?.foto_r2_key){
-      const key = String(row.foto_r2_key).replace(/^fotos\//,''); // normaliza si viniera con 'fotos/'
-      return `${base}/raw-public/${encodeURI(key)}`;
-    }
-    if (row?.foto_url) return `${base}/raw?url=${encodeURIComponent(row.foto_url)}`;
-    return '';
-  }
-
-  // Cache de panoramas (obj URLs)
-  const panoCache = new Map();      // id -> objUrl
-  const preloadedGroups = new Set();
-  function clearPanoCache(){
-    for (const url of panoCache.values()) { try{ URL.revokeObjectURL(url); }catch{} }
-    panoCache.clear();
-    preloadedGroups.clear();
-    document.getElementById('preloadStatus').textContent = '—';
-  }
-
-  async function getPanoramaUrl(row){
-    if (panoCache.has(row.id)) return panoCache.get(row.id);
-    const src = buildSrc(row);
-    if (!src) return null;
-    const resp = await fetch(src, { cache:'force-cache' });
-    if (!resp.ok) throw new Error('HTTP '+resp.status);
-    const blob = await resp.blob();
-    const objUrl = URL.createObjectURL(blob);
-    panoCache.set(row.id, objUrl);
-    return objUrl;
-  }
-
-  async function open360ForRow(row){
-    const v = ensurePanoViewer();
-    document.getElementById('viewerTitle').textContent = `#${row.numero??''} ${row.progresiva||row.codigo||''}`;
-    try{
-      const objUrl = await getPanoramaUrl(row);
-      if (!objUrl) throw new Error('Sin fuente de imagen');
-      const cfg = v.getConfig(); cfg.scenes = cfg.scenes || {};
-      const sceneId = 'p_'+row.id+'_'+Date.now();
-      v.addScene(sceneId, { type:'equirectangular', panorama:objUrl, autoLoad:true, pitch:VIEW.pitch, yaw:VIEW.yaw, hfov:VIEW.hfov });
-      v.loadScene(sceneId, VIEW.pitch, VIEW.yaw, VIEW.hfov); // vista explícita (sin cielo)
-      requestAnimationFrame(()=> v.resize());                // reflow
-    }catch(e){
-      console.error('[360] fallo:', e);
-      alert('No se pudo cargar el 360. Verifica 2:1 y que la URL responda 200.');
-    }
-  }
-
-  // Precarga del grupo seleccionado (concurrencia simple)
-  async function preloadGroup(g, {silent=false}={}){
-    const arr = groupTracks.get(g)||[];
-    if (!arr.length){ if(!silent) document.getElementById('preloadStatus').textContent='(grupo vacío)'; return; }
-    if (preloadedGroups.has(g)){ if(!silent) document.getElementById('preloadStatus').textContent='Listo (cache)'; return; }
-
-    const label = document.getElementById('preloadStatus');
-    let done = 0;
-    const update = ()=> { label.textContent = `Precargando ${done}/${arr.length}`; };
-
-    // Concurrencia 3
-    const N=3;
-    const queue = arr.slice(); // copia
-    const worker = async ()=>{
-      while(queue.length){
-        const r = queue.shift();
-        try { await getPanoramaUrl(r); } catch(e){ /* log opcional */ }
-        done++; if(!silent) update();
-      }
-    };
-    if(!silent) update();
-    await Promise.all(Array.from({length:Math.min(N,arr.length)}, worker));
-    preloadedGroups.add(g);
-    if(!silent) label.textContent = 'Precarga completa';
-  }
-
-  // Precargar por adelantado (lookahead) durante el recorrido
-  function preloadAhead(g, idx, k=3){
-    const arr = groupTracks.get(g)||[];
-    for (let i=1;i<=k;i++){
-      const r = arr[idx+i]; if (!r) break;
-      if (!panoCache.has(r.id)) getPanoramaUrl(r).catch(()=>{});
-    }
-  }
-
-  // ===== Búsqueda + botones =====
-  document.getElementById('search').addEventListener('keydown', (e)=>{ if(e.key==='Enter') loadFotos(e.target.value); });
-
-  // ===== Inicio =====
-  (async ()=>{
-    await loadFotos();
-    await loadMarcaciones();
-    ensurePanoViewer(); // crear de una vez
-  })();
-</script>
+  <!-- Tu JS -->
+  <script src="app.js"></script>
 </body>
 </html>
