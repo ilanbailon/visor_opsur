@@ -101,3 +101,15 @@ button, input, select, textarea{
 }
 .muted{ color:#94a3b8; font-size:12px }
 .actions{ display:flex; gap:8px; justify-content:flex-end }
+
+/* Overlay de carga para el visor (foto / 360) */
+#viewerLoading{
+  position:absolute; inset:0;
+  display:none; place-items:center;
+  background:rgba(0,0,0,.35);
+  z-index:1200; /* sobre el visor */
+  text-align:center; gap:10px;
+  font-weight:600;
+}
+#viewerLoading.show{ display:grid; }
+#viewerLoading .spinner{ margin-right:6px; }
