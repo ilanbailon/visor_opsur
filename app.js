@@ -401,6 +401,45 @@ function updateCountPts(){
   document.getElementById('countPts').textContent = `${obj?.rows?.length || 0} pts`;
 }
 
+function toSheetName(name){
+  const clean = String(name || 'Recorrido').replace(/[\\/:*?\[\]]/g, ' ').trim() || 'Recorrido';
+  return clean.slice(0, 31);
+}
+
+function exportSelectedRecorrido(){
+  const groupName = document.getElementById('selGrupo').value || 'Sin grupo';
+  const obj = groups.get(groupName) || { rows: [] };
+  const rows = obj.rows || [];
+  if (!rows.length){
+    setStatus('No hay puntos para exportar');
+    return;
+  }
+  if (typeof XLSX === 'undefined' || !XLSX?.utils){
+    console.error('Librería XLSX no disponible');
+    setStatus('Error exportando: XLSX no cargado');
+    return;
+  }
+
+  const data = rows.map((row, idx)=>{
+    const lat = Number(row.norte);
+    const lng = Number(row.este);
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+    return {
+      '#': row.numero ?? (idx + 1),
+      Progresiva: row.progresiva || row.codigo || '',
+      'Coordenadas (lat, lng)': hasCoords ? `${lat.toFixed(6)}, ${lng.toFixed(6)}` : '',
+      Descripción: row.descripcion || ''
+    };
+  });
+
+  const sheet = XLSX.utils.json_to_sheet(data, { header: ['#','Progresiva','Coordenadas (lat, lng)','Descripción'] });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, sheet, toSheetName(groupName));
+  const fileName = `recorrido_${sanitizePath(groupName || 'sin_grupo') || 'recorrido'}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+  setStatus('Excel generado');
+}
+
 /* ===== Click recorrido (manual) ===== */
 function onRecClick(row, cm){
   const groupName = row.grupo ?? 'Sin grupo';
@@ -605,6 +644,7 @@ document.getElementById('btnRecorrido').onclick = async ()=>{
 document.getElementById('selGrupo').addEventListener('change', ()=>{ stopPlay(); drawRoute(); updateCountPts(); playIdx=0; updateNowInfo(); clearCaches(); });
 document.getElementById('btnPrev').onclick = ()=> step(-1, true);
 document.getElementById('btnNext').onclick = ()=> step(+1, true);
+document.getElementById('btnExportRecorrido').onclick = exportSelectedRecorrido;
 document.getElementById('btnPlay').onclick = async ()=>{
   if(playTimer){ stopPlay(); return; }
   const g=document.getElementById('selGrupo').value;
