@@ -53,8 +53,9 @@ button, input, select, textarea{
 #photoContainer img{ max-width:100%; max-height:100%; border-radius:6px; transition: transform .2s ease; }
 
 /* Recorrido: vértices y línea */
-.vtx-default { stroke:#7c2d12; stroke-width:1.5px; fill:#f59e0b; fill-opacity:.95; }
-.vtx-highlight { stroke:#fff !important; stroke-width:2.5px !important; fill:#f97316 !important; }
+.vtx-point { stroke:#0f172a; stroke-width:1.5px; fill:#38bdf8; fill-opacity:.95; }
+.vtx-has-desc { stroke:#7c2d12; fill:#f97316; }
+.vtx-highlight { stroke:#f8fafc !important; stroke-width:2.8px !important; filter:drop-shadow(0 0 4px rgba(148,163,184,.8)); }
 
 /* Busy badge */
 #busyBadge{

@@ -69,6 +69,10 @@ function hideLoading(){ loading.style.display='none'; }
 const statusEl = document.getElementById('status');
 function setStatus(t){ statusEl.textContent=t; clearTimeout(setStatus._t); setStatus._t=setTimeout(()=>statusEl.textContent='Listo',3000); }
 function esc(s){ return String(s??'').replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+function xmlEscape(s){
+  const map = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&apos;' };
+  return String(s ?? '').replace(/[&<>"']/g, c=>map[c]);
+}
 function detectField(obj,cands){ const ks=Object.keys(obj||{}); for(const c of cands){ const k=ks.find(k=>k.toLowerCase()===c.toLowerCase()); if(k) return k; } for(const c of cands){ const k=ks.find(k=>k.toLowerCase().includes(c.toLowerCase())); if(k) return k; } return null; }
 function toNumberFlexible(v){ if(v==null) return NaN; if(typeof v==='number') return v; if(typeof v!=='string') return NaN; const n=parseFloat(v.trim().replace(/\s+/g,'').replace(',', '.')); return Number.isFinite(n)?n:NaN; }
 function sanitizePath(s){ return String(s||'').normalize('NFKD').replace(/[^a-zA-Z0-9_\-\/\.]+/g,'-').replace(/--+/g,'-').replace(/^-+|-+$/g,''); }
@@ -207,6 +211,9 @@ let allMarcs = [];           // marcaciones
 const markerById = new Map();// recorrido: id -> circleMarker
 let routeLayerActive = null;
 
+const BASE_VERTEX_STYLE = { radius:7, weight:1.8, opacity:.95, fillOpacity:.95 };
+const HIGHLIGHT_VERTEX_STYLE = { radius:9, weight:2.6, opacity:1, fillOpacity:1 };
+
 function buildSrc(row){
   const base = R2_UPLOADER_URL.replace(/\/$/,'');
   if (row?.foto_r2_key){
@@ -258,9 +265,10 @@ async function loadFotos(filterText){
       if(!Number.isFinite(lat)||!Number.isFinite(lng)) continue;
 
       latlngs.push([lat,lng]);
-      const cm = L.circleMarker([lat,lng], {
-        radius: 7, weight: 1.8, opacity:.95, fillOpacity:.95, className:'vtx-default'
-      }).bindPopup(popupRec(row));
+      const hasDesc = Boolean(String(row.descripcion || '').trim());
+      const className = hasDesc ? 'vtx-point vtx-has-desc' : 'vtx-point';
+      const cm = L.circleMarker([lat,lng], Object.assign({}, BASE_VERTEX_STYLE, { className }))
+        .bindPopup(popupRec(row));
       cm.on('click', ()=> onRecClick(row, cm));
       cm.addTo(grp.points);
       markerById.set(row.id, cm);
@@ -380,12 +388,21 @@ function refillGroupSelector(){
 
 /* ===== Highlight & ruta activa ===== */
 let lastHighlight=null;
+function applyVertexStyle(marker, style){
+  if (!marker?.setStyle || !style) return;
+  marker.setStyle({
+    radius: style.radius,
+    weight: style.weight,
+    opacity: style.opacity,
+    fillOpacity: style.fillOpacity
+  });
+}
 function highlightVertex(cm){
   if (lastHighlight && lastHighlight.setStyle){
-    lastHighlight.setStyle({ radius:7, weight:1.8 });
+    applyVertexStyle(lastHighlight, BASE_VERTEX_STYLE);
     lastHighlight._path?.classList.remove('vtx-highlight');
   }
-  cm.setStyle({ radius:9, weight:2.6 });
+  applyVertexStyle(cm, HIGHLIGHT_VERTEX_STYLE);
   cm._path?.classList.add('vtx-highlight');
   lastHighlight=cm;
 }
@@ -399,6 +416,150 @@ function updateCountPts(){
   const g=document.getElementById('selGrupo').value;
   const obj=groups.get(g);
   document.getElementById('countPts').textContent = `${obj?.rows?.length || 0} pts`;
+}
+
+function toSheetName(name){
+  const clean = String(name || 'Recorrido').replace(/[\\/:*?\[\]]/g, ' ').trim() || 'Recorrido';
+  return clean.slice(0, 31);
+}
+
+function exportSelectedRecorrido(){
+  const groupName = document.getElementById('selGrupo').value || 'Sin grupo';
+  const obj = groups.get(groupName) || { rows: [] };
+  const rows = obj.rows || [];
+  if (!rows.length){
+    setStatus('No hay puntos para exportar');
+    return;
+  }
+  if (typeof XLSX === 'undefined' || !XLSX?.utils){
+    console.error('Librería XLSX no disponible');
+    setStatus('Error exportando: XLSX no cargado');
+    return;
+  }
+
+  const data = rows.map((row, idx)=>{
+    const lat = Number(row.norte);
+    const lng = Number(row.este);
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+    return {
+      '#': row.numero ?? (idx + 1),
+      Progresiva: row.progresiva || row.codigo || '',
+      'Coordenadas (lat, lng)': hasCoords ? `${lat.toFixed(6)}, ${lng.toFixed(6)}` : '',
+      Descripción: row.descripcion || ''
+    };
+  });
+
+  const sheet = XLSX.utils.json_to_sheet(data, { header: ['#','Progresiva','Coordenadas (lat, lng)','Descripción'] });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, sheet, toSheetName(groupName));
+  const fileName = `recorrido_${sanitizePath(groupName || 'sin_grupo') || 'recorrido'}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+  setStatus('Excel generado');
+}
+
+async function exportSelectedRecorridoKMZ(){
+  const groupName = document.getElementById('selGrupo').value || 'Sin grupo';
+  const obj = groups.get(groupName) || { rows: [] };
+  const rows = (obj.rows || []).filter(row=>{
+    const lat = Number(row.norte);
+    const lng = Number(row.este);
+    return Number.isFinite(lat) && Number.isFinite(lng);
+  });
+  if (!rows.length){
+    setStatus('Sin coordenadas válidas para KMZ');
+    return;
+  }
+  if (typeof JSZip === 'undefined'){
+    console.error('Librería JSZip no disponible');
+    setStatus('Error exportando KMZ: JSZip no cargado');
+    return;
+  }
+
+  try{
+    const placemarks = rows.map((row, idx)=>{
+      const lat = Number(row.norte);
+      const lng = Number(row.este);
+      const label = row.progresiva || row.codigo || `Punto ${row.numero ?? (idx + 1)}`;
+      const styleId = row.descripcion ? 'sHasDesc' : 'sDefault';
+      const descParts = [];
+      if (row.descripcion){
+        descParts.push(`<p><strong>Descripción:</strong> ${esc(row.descripcion)}</p>`);
+      }
+      descParts.push(`<p><strong>Progresiva:</strong> ${esc(row.progresiva || row.codigo || '—')}</p>`);
+      descParts.push(`<p><strong>Coordenadas:</strong> ${lng.toFixed(6)}, ${lat.toFixed(6)}</p>`);
+      if (row.numero != null) descParts.push(`<p><strong>#:</strong> ${esc(row.numero)}</p>`);
+      return `    <Placemark>
+      <name>${xmlEscape(label)}</name>
+      <styleUrl>#${styleId}</styleUrl>
+      <description><![CDATA[${descParts.join('')}]]></description>
+      <Point><coordinates>${lng.toFixed(6)},${lat.toFixed(6)},0</coordinates></Point>
+    </Placemark>`;
+    }).join('\n');
+
+    let routePlacemark = '';
+    if (rows.length >= 2){
+      const coordStr = rows.map(row=>{
+        const lat = Number(row.norte);
+        const lng = Number(row.este);
+        return `${lng.toFixed(6)},${lat.toFixed(6)},0`;
+      }).join(' ');
+      routePlacemark = `    <Placemark>
+      <name>${xmlEscape(`Ruta ${groupName}`)}</name>
+      <styleUrl>#sRoute</styleUrl>
+      <LineString>
+        <tessellate>1</tessellate>
+        <coordinates>${coordStr}</coordinates>
+      </LineString>
+    </Placemark>\n`;
+    }
+
+    const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>${xmlEscape(groupName || 'Recorrido')}</name>
+    <Style id="sDefault">
+      <IconStyle>
+        <scale>1.1</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/kml/paddle/ylw-circle.png</href>
+        </Icon>
+      </IconStyle>
+    </Style>
+    <Style id="sHasDesc">
+      <IconStyle>
+        <scale>1.15</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/kml/paddle/orange-stars.png</href>
+        </Icon>
+      </IconStyle>
+    </Style>
+    <Style id="sRoute">
+      <LineStyle>
+        <color>ffeed322</color>
+        <width>3.2</width>
+      </LineStyle>
+    </Style>
+${routePlacemark}${placemarks}
+  </Document>
+</kml>`;
+
+    const zip = new JSZip();
+    zip.file('doc.kml', kml);
+    const blob = await zip.generateAsync({ type:'blob', compression:'DEFLATE' });
+    const fileName = `recorrido_${sanitizePath(groupName || 'sin_grupo') || 'recorrido'}.kmz`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=> URL.revokeObjectURL(url), 10_000);
+    setStatus('KMZ generado');
+  }catch(err){
+    console.error('Falló exportación KMZ', err);
+    setStatus('Error exportando KMZ');
+  }
 }
 
 /* ===== Click recorrido (manual) ===== */
@@ -605,6 +766,10 @@ document.getElementById('btnRecorrido').onclick = async ()=>{
 document.getElementById('selGrupo').addEventListener('change', ()=>{ stopPlay(); drawRoute(); updateCountPts(); playIdx=0; updateNowInfo(); clearCaches(); });
 document.getElementById('btnPrev').onclick = ()=> step(-1, true);
 document.getElementById('btnNext').onclick = ()=> step(+1, true);
+const btnExportRecorrido = document.getElementById('btnExportRecorrido');
+if (btnExportRecorrido) btnExportRecorrido.onclick = exportSelectedRecorrido;
+const btnExportKMZ = document.getElementById('btnExportKMZ');
+if (btnExportKMZ) btnExportKMZ.onclick = exportSelectedRecorridoKMZ;
 document.getElementById('btnPlay').onclick = async ()=>{
   if(playTimer){ stopPlay(); return; }
   const g=document.getElementById('selGrupo').value;
