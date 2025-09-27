@@ -766,10 +766,14 @@ document.getElementById('btnRecorrido').onclick = async ()=>{
 document.getElementById('selGrupo').addEventListener('change', ()=>{ stopPlay(); drawRoute(); updateCountPts(); playIdx=0; updateNowInfo(); clearCaches(); });
 document.getElementById('btnPrev').onclick = ()=> step(-1, true);
 document.getElementById('btnNext').onclick = ()=> step(+1, true);
+
 const btnExportRecorrido = document.getElementById('btnExportRecorrido');
 if (btnExportRecorrido) btnExportRecorrido.onclick = exportSelectedRecorrido;
 const btnExportKMZ = document.getElementById('btnExportKMZ');
 if (btnExportKMZ) btnExportKMZ.onclick = exportSelectedRecorridoKMZ;
+
+document.getElementById('btnExportRecorrido').onclick = exportSelectedRecorrido;
+
 document.getElementById('btnPlay').onclick = async ()=>{
   if(playTimer){ stopPlay(); return; }
   const g=document.getElementById('selGrupo').value;
