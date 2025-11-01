@@ -7,6 +7,21 @@ const VIEW = { pitch: 0, yaw: 0, hfov: 108 };
 const HIDE_POINTS_ZOOM = 14;
 
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseSessionReady = ensureSupabaseSession();
+
+async function ensureSupabaseSession(){
+  try{
+    const { data:{ session } } = await supabase.auth.getSession();
+    if (session?.access_token) return session;
+    if (typeof supabase.auth.signInAnonymously !== 'function') return session ?? null;
+    const { data, error } = await supabase.auth.signInAnonymously();
+    if (error) throw error;
+    return data?.session ?? null;
+  }catch(err){
+    console.warn('Supabase: no se pudo iniciar sesión anónima', err);
+    return null;
+  }
+}
 
 /* ====== Busy / Progreso (CSV/ZIP/imagenes) ====== */
 const loading = document.getElementById('loading');
@@ -77,6 +92,17 @@ function detectField(obj,cands){ const ks=Object.keys(obj||{}); for(const c of c
 function toNumberFlexible(v){ if(v==null) return NaN; if(typeof v==='number') return v; if(typeof v!=='string') return NaN; const n=parseFloat(v.trim().replace(/\s+/g,'').replace(',', '.')); return Number.isFinite(n)?n:NaN; }
 function sanitizePath(s){ return String(s||'').normalize('NFKD').replace(/[^a-zA-Z0-9_\-\/\.]+/g,'-').replace(/--+/g,'-').replace(/^-+|-+$/g,''); }
 
+function formatBytes(bytes){
+  const num = Number(bytes);
+  if (!Number.isFinite(num) || num <= 0) return '';
+  const units = ['B','KB','MB','GB','TB'];
+  let value = num;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1){ value /= 1024; unit++; }
+  const digits = value >= 10 || unit === 0 ? 0 : 1;
+  return `${value.toFixed(digits)} ${units[unit]}`;
+}
+
 /* ===== Loading del visor (por imagen) ===== */
 const viewerLoading = document.getElementById('viewerLoading');
 const viewerLoadingText = document.getElementById('viewerLoadingText');
@@ -104,6 +130,120 @@ function showEmptyViewer(){
   document.getElementById('controlsPhoto').style.display = 'none';
   document.getElementById('controlsRun').style.display = 'none';
   hideViewerLoading();
+}
+
+/* ===== Adjuntos marcaciones ===== */
+const attachmentsModal = document.getElementById('attachmentsModal');
+const attachmentsListEl = document.getElementById('attachmentsList');
+const attachmentPreviewEl = document.getElementById('attachmentPreview');
+const attachmentDownloadEl = document.getElementById('attachmentDownload');
+let marcacionAdjuntosMap = new Map();
+let attachmentsModalState = { marcacionId:null, items:[], selectedId:null };
+
+function normalizeAdjuntos(data){
+  const map = new Map();
+  for (const item of data || []){
+    if (!map.has(item.marcacion_id)) map.set(item.marcacion_id, []);
+    map.get(item.marcacion_id).push(item);
+  }
+  for (const list of map.values()){
+    list.sort((a,b)=> new Date(b.created_at||0) - new Date(a.created_at||0));
+  }
+  return map;
+}
+
+function renderAttachmentPreview(att){
+  if (!attachmentPreviewEl) return;
+  if (!att){
+    attachmentPreviewEl.innerHTML = '<div class="muted">Selecciona un adjunto para previsualizarlo.</div>';
+    if (attachmentDownloadEl){ attachmentDownloadEl.style.display = 'none'; }
+    return;
+  }
+  const url = att.url || att.foto_url || '';
+  const safeUrl = esc(url);
+  const type = (att.content_type || '').toLowerCase();
+  const name = (att.nombre || '').toLowerCase();
+  let html = '';
+  if (type.startsWith('image/')){
+    html = `<img src="${safeUrl}" alt="${esc(att.nombre||'Adjunto')}" loading="lazy">`;
+  } else if (type === 'application/pdf' || name.endsWith('.pdf')){
+    html = `<iframe src="${safeUrl}#toolbar=0" title="${esc(att.nombre||'PDF')}" loading="lazy"></iframe>`;
+  } else {
+    html = `<div class="unavailable"><div class="muted" style="margin-bottom:8px">No se puede previsualizar este tipo de archivo.</div><a href="${safeUrl}" target="_blank" rel="noopener">Abrir en nueva pestaña</a></div>`;
+  }
+  attachmentPreviewEl.innerHTML = html;
+  if (attachmentDownloadEl){
+    attachmentDownloadEl.href = url;
+    attachmentDownloadEl.download = att.nombre || '';
+    attachmentDownloadEl.style.display = url ? 'inline-flex' : 'none';
+  }
+}
+
+function populateAttachmentsList(items){
+  if (!attachmentsListEl) return;
+  if (!items.length){
+    attachmentsListEl.innerHTML = '<div class="muted">No hay adjuntos para esta marcación.</div>';
+    renderAttachmentPreview(null);
+    return;
+  }
+  attachmentsListEl.innerHTML = items.map(att=>{
+    const size = formatBytes(att.size);
+    const meta = [att.content_type||'', size].filter(Boolean).join(' · ');
+    return `<div class="attachments-item" data-id="${att.id}">
+        <div class="name">${esc(att.nombre||'Adjunto')}</div>
+        <div class="meta">${esc(meta)}</div>
+      </div>`;
+  }).join('');
+  Array.from(attachmentsListEl.querySelectorAll('.attachments-item')).forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const id = Number(el.dataset.id);
+      selectAttachmentInModal(id);
+    });
+  });
+}
+
+function selectAttachmentInModal(id){
+  if (!attachmentsModalState?.items?.length) return;
+  const att = attachmentsModalState.items.find(a=>a.id === id);
+  if (!att) return;
+  attachmentsModalState.selectedId = id;
+  if (attachmentsListEl){
+    Array.from(attachmentsListEl.querySelectorAll('.attachments-item')).forEach(el=>{
+      el.classList.toggle('active', Number(el.dataset.id) === id);
+    });
+  }
+  renderAttachmentPreview(att);
+}
+
+function openAttachmentsModal(marcacionId, attachmentId){
+  const row = allMarcs.find(x=>x.id === marcacionId);
+  if (!row) return;
+  attachmentsModalState = { marcacionId, items: row.adjuntos || [], selectedId:null };
+  populateAttachmentsList(attachmentsModalState.items);
+  renderAttachmentPreview(null);
+  if (attachmentsModal){
+    openModal(attachmentsModal);
+  }
+  const firstId = attachmentId || attachmentsModalState.items[0]?.id;
+  if (firstId) selectAttachmentInModal(firstId);
+}
+
+window.__openAdjuntos = (id)=>{ openAttachmentsModal(id); };
+window.__openAdjunto = (id, attId)=>{ openAttachmentsModal(id, attId); };
+
+function buildAttachmentsSnippet(row){
+  const items = row?.adjuntos || [];
+  const title = '<div class="popup-attachments"><span class="title">Adjuntos</span>';
+  if (!items.length){
+    return `${title}<div class="muted">Sin archivos</div></div>`;
+  }
+  const previews = items.slice(0,3).map(att=>`
+      <button onclick="window.__openAdjunto(${row.id},${att.id});return false;">${esc(att.nombre||'Archivo')}</button>
+    `).join('');
+  const more = items.length>3 ? `<div class="muted">+${items.length-3} más…</div>` : '';
+  return `${title}<div class="popup-attachments-list">${previews}</div>${more}
+      <div class="view-all"><button class="ghost" onclick="window.__openAdjuntos(${row.id});return false;">📎 Ver todos (${items.length})</button></div>
+    </div>`;
 }
 
 /* Descarga con progreso (si hay Content-Length) */
@@ -226,6 +366,7 @@ function buildSrc(row){
 
 /* ===== Carga de recorridos ===== */
 async function loadFotos(filterText){
+  await supabaseSessionReady;
   setStatus('Cargando recorridos…');
   for (const obj of groups.values()){
     obj.parent.clearLayers(); obj.points.clearLayers(); obj.line=null; obj.rows=[]; obj.bounds=null;
@@ -311,6 +452,7 @@ window.__editRec = (id)=>{
 
 /* ===== Carga de marcaciones ===== */
 async function loadMarcaciones(){
+  await supabaseSessionReady;
   setStatus('Cargando marcaciones…');
   marcacionesCluster.clearLayers();
   const { data, error } = await supabase
@@ -318,9 +460,24 @@ async function loadMarcaciones(){
     .select('id,nombre,descripcion,lat,lng,tipo,foto_url,foto_r2_key,created_at')
     .order('id');
   if(error){ console.error(error); setStatus('Error cargando marcaciones'); return; }
-  allMarcs = data||[];
+  let attachmentsData = [];
+  let attachmentsOk = true;
+  try{
+    const { data:adj, error:adjError } = await supabase
+      .from('marcaciones_adjuntos')
+      .select('id,marcacion_id,nombre,url,r2_key,content_type,size,created_at')
+      .order('created_at', { ascending:false });
+    if (adjError) throw adjError;
+    attachmentsData = adj || [];
+  }catch(adjError){
+    console.error('Error cargando adjuntos de marcaciones', adjError);
+    attachmentsOk = false;
+  }
+  marcacionAdjuntosMap = normalizeAdjuntos(attachmentsData);
+  allMarcs = (data||[]).map(row=>({ ...row, adjuntos: marcacionAdjuntosMap.get(row.id) || [] }));
   for(const row of allMarcs){ addMarcacionMarker(row); }
-  setStatus(`Marcaciones: ${allMarcs.length}`);
+  const statusMsg = attachmentsOk ? `Marcaciones: ${allMarcs.length}` : `Marcaciones: ${allMarcs.length} · adjuntos no disponibles`;
+  setStatus(statusMsg);
   enhanceOverlayControlZoomButtons();
 }
 
@@ -330,6 +487,7 @@ function addMarcacionMarker(row){
   const html = `<b>${esc(row.nombre ?? 'Sin nombre')}</b>${row.descripcion? `<br><em>${esc(row.descripcion)}</em>`:''}
                 <br><small>${esc(row.tipo||'sin imagen')}</small>
                 <br><small>id: ${row.id} · ${lat.toFixed(6)}, ${lng.toFixed(6)}</small>
+                ${buildAttachmentsSnippet(row)}
                 <div style="margin-top:6px"><button class="ghost" onclick="window.__editMark(${row.id});return false;">✎ Editar</button></div>`;
   const m=L.marker([lat,lng],{icon}).bindPopup(html);
   m.on('click', async ()=>{
@@ -360,6 +518,27 @@ window.__editMark = (id)=>{
         <img src="${src}" alt="preview" style="max-width:140px;max-height:90px;border:1px solid #334155;border-radius:6px">
       </a>`;
   } else { prev.textContent = '—'; }
+  const listEl = document.getElementById('emAttachmentsList');
+  if (listEl){
+    const attachments = r.adjuntos || [];
+    listEl.classList.toggle('muted', attachments.length===0);
+    if (!attachments.length){
+      listEl.innerHTML = '<div class="empty">Sin adjuntos</div>';
+    } else {
+      listEl.innerHTML = attachments.map(att=>{
+        const meta = [formatBytes(att.size), att.content_type||''].filter(Boolean).join(' · ');
+        return `<div class="item">
+            <label><input type="checkbox" data-remove-id="${att.id}"> <span>${esc(att.nombre||'Archivo')}</span></label>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+              ${meta ? `<span class="muted" style="font-size:11px;">${esc(meta)}</span>` : ''}
+              <button type="button" onclick="window.__openAdjunto(${r.id},${att.id});return false;">Ver</button>
+            </div>
+          </div>`;
+      }).join('');
+    }
+  }
+  const editAttInput = document.getElementById('emAttachments');
+  if (editAttInput) editAttInput.value = '';
   openModal(document.getElementById('editMarkModal'));
 };
 
@@ -882,6 +1061,23 @@ async function uploadToR2(workerUrl, keyPath, file){
   if(!res.ok){ const t=await res.text(); throw new Error(`R2 upload HTTP ${res.status}: ${t}`); }
   return res.json(); // { url, key }
 }
+async function deleteFromR2(workerUrl, key){
+  if (!key) return false;
+  try{
+    const form = new FormData();
+    form.append('key', key);
+    const res = await fetch(workerUrl.replace(/\/$/,'') + '/delete', { method:'POST', body: form });
+    if (res.status === 404){
+      console.info('R2: objeto no encontrado (ya eliminado)', key);
+      return false;
+    }
+    if (!res.ok){ const t = await res.text().catch(()=> ''); throw new Error(`R2 delete HTTP ${res.status}: ${t}`); }
+    return true;
+  }catch(err){
+    console.warn('No se pudo eliminar de R2', key, err);
+    return false;
+  }
+}
 async function updateFotoUrl(table,rowId,url,key){
   const endpoint=SUPABASE_URL.replace(/\/$/,'' ) + `/rest/v1/${table}?id=eq.`+encodeURIComponent(rowId);
   const res=await fetch(endpoint,{method:'PATCH',headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':`Bearer ${SUPABASE_ANON_KEY}`,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({foto_url:url,foto_r2_key:key})});
@@ -930,6 +1126,7 @@ async function uploadGroupCsvAndZip(grupo, rowsCsv, zipFile){
   const entries=Object.values(zip.files).filter(f=>!f.dir);
   if(!entries.length) throw new Error('ZIP vacío');
 
+  await supabaseSessionReady;
   const { data: insertedRows, error: insErr } = await supabase
     .from('fotos_recorrido')
     .select('id,codigo')
@@ -976,8 +1173,8 @@ async function uploadGroupCsvAndZip(grupo, rowsCsv, zipFile){
 }
 
 /* ===== Modales genéricos ===== */
-function openModal(mod){ mod.classList.add('show'); }
-function closeModal(mod){ mod.classList.remove('show'); }
+function openModal(mod){ if (!mod) return; mod.classList.add('show'); mod.setAttribute('aria-hidden','false'); }
+function closeModal(mod){ if (!mod) return; mod.classList.remove('show'); mod.setAttribute('aria-hidden','true'); }
 document.querySelectorAll('.modal .backdrop,[data-close]').forEach(el=> el.addEventListener('click', (e)=>{
   const m = e.target.closest('.modal'); if(m) closeModal(m);
 }));
@@ -999,6 +1196,8 @@ map.on('click', (e)=>{
   document.getElementById('mDesc').value = 'Añadido desde el mapa';
   document.getElementById('mTipo').value = '';
   document.getElementById('mFile').value = '';
+  const attInput = document.getElementById('mAttachments');
+  if (attInput) attInput.value = '';
   document.getElementById('markMsg').textContent = '';
   openModal(markModal);
 });
@@ -1010,19 +1209,27 @@ document.getElementById('markForm').addEventListener('submit', async (e)=>{
   const lat=Number(document.getElementById('mLat').value);
   const lng=Number(document.getElementById('mLng').value);
   const file=document.getElementById('mFile').files[0];
+  const attachments = Array.from(document.getElementById('mAttachments')?.files || []);
   const msg=document.getElementById('markMsg');
   if(!nombre || !Number.isFinite(lat) || !Number.isFinite(lng)){ msg.textContent='Complete nombre y coordenadas válidas.'; return; }
   try{
-    if (file) beginBusy('Subiendo imagen', 100);
+    const session = await supabaseSessionReady;
+    if (!session && attachments.length){
+      throw new Error('No se pudo iniciar sesión anónima en Supabase. Revisa Auth → Providers y habilita "Enable anonymous sign-ins".');
+    }
+    const totalUploads = (file?1:0) + attachments.length;
+    let uploadsDone = 0;
+    if (totalUploads){ beginBusy('Subiendo archivos', totalUploads); }
 
     let foto_url=null, foto_r2_key=null;
     if (file){
-      setBusyMsg('Subiendo imagen…');
+      setBusyMsg(`Subiendo imagen (${file.name})…`);
       const ext=(file.name.match(/\.[^.]+$/)?.[0]||'.jpg').toLowerCase();
       const keyPath=`marcaciones/${Date.now()}_${sanitizePath(file.name.replace(/\.[^.]+$/,''))}${ext}`;
       const up=await uploadToR2(R2_UPLOADER_URL, keyPath, file);
       foto_url=up.url; foto_r2_key=up.key;
-      setBusyProgress(100, 100, 'Imagen subida');
+      uploadsDone++;
+      if (totalUploads) setBusyProgress(uploadsDone, totalUploads, `Archivos ${uploadsDone}/${totalUploads}`);
     }
     const ewkt=`SRID=4326;POINT(${lng} ${lat})`;
     const body=[{ nombre, descripcion:descripcion||null, lat, lng, geom:ewkt, tipo:(file?tipo:null), foto_url, foto_r2_key }];
@@ -1030,6 +1237,40 @@ document.getElementById('markForm').addEventListener('submit', async (e)=>{
     const res=await fetch(url,{method:'POST',headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':`Bearer ${SUPABASE_ANON_KEY}`,'Content-Type':'application/json','Prefer':'return=representation'},body:JSON.stringify(body)});
     if(!res.ok){ const t=await res.text(); throw new Error(`HTTP ${res.status}: ${t}`); }
     const [row]=await res.json();
+
+    if (attachments.length){
+      const created = [];
+      for (let i=0;i<attachments.length;i++){
+        const att = attachments[i];
+        setBusyMsg(`Subiendo adjunto (${i+1}/${attachments.length})…`);
+        const keyPath=`marcaciones/${row.id}/adjuntos/${Date.now()}_${i}_${sanitizePath(att.name)}`;
+        const up = await uploadToR2(R2_UPLOADER_URL, keyPath, att);
+        const { data: inserted, error: attError } = await supabase
+          .from('marcaciones_adjuntos')
+          .insert({
+            marcacion_id: row.id,
+            nombre: att.name,
+            url: up.url,
+            r2_key: up.key,
+            content_type: att.type || null,
+            size: att.size ?? null
+          })
+          .select()
+          .single();
+        if (attError){
+          await deleteFromR2(R2_UPLOADER_URL, up.key);
+          throw new Error(attError.message || 'Error guardando adjunto');
+        }
+        created.push(inserted);
+        uploadsDone++;
+        if (totalUploads) setBusyProgress(uploadsDone, totalUploads, `Archivos ${uploadsDone}/${totalUploads}`);
+      }
+      row.adjuntos = created;
+      marcacionAdjuntosMap.set(row.id, created);
+    } else {
+      row.adjuntos = [];
+    }
+
     allMarcs.push(row);
     const m=addMarcacionMarker(row);
     if(m){ map.panTo(m.getLatLng()); m.openPopup(); }
@@ -1043,6 +1284,8 @@ document.getElementById('markForm').addEventListener('submit', async (e)=>{
     }
 
     msg.textContent='✅ Marcación guardada';
+    const newAttInput = document.getElementById('mAttachments');
+    if (newAttInput) newAttInput.value='';
     closeModal(markModal);
     markMode=false; document.getElementById('btnMark').textContent='➕ Marcar punto'; map._container.style.cursor='';
   }catch(err){ console.error(err); msg.textContent='Error: '+err.message; }
@@ -1062,8 +1305,19 @@ document.getElementById('editMarkForm').addEventListener('submit', async (e)=>{
 
   if(!nombre){ msg.textContent='Indica un nombre.'; return; }
 
+  const newAttachments = Array.from(document.getElementById('emAttachments')?.files || []);
+  const removeAttachmentIds = Array.from(document.querySelectorAll('#emAttachmentsList input[data-remove-id]:checked')).map(el=>Number(el.dataset.removeId)).filter(Boolean);
+
   try{
-    if (file) beginBusy('Subiendo imagen', 100); else beginBusy('Guardando cambios', 0);
+    const session = await supabaseSessionReady;
+    if (!session && (newAttachments.length || removeAttachmentIds.length)){
+      throw new Error('No se pudo iniciar sesión anónima en Supabase. Revisa Auth → Providers y habilita "Enable anonymous sign-ins".');
+    }
+    const totalUploads = (file?1:0) + newAttachments.length;
+    const totalOps = totalUploads + removeAttachmentIds.length;
+    const busyLabel = totalOps ? 'Procesando archivos' : 'Guardando cambios';
+    beginBusy(busyLabel, totalOps);
+    let doneOps = 0;
 
     const patch = { nombre, descripcion: descripcion || null };
 
@@ -1080,10 +1334,12 @@ document.getElementById('editMarkForm').addEventListener('submit', async (e)=>{
         const up = await uploadToR2(R2_UPLOADER_URL, keyPath, file);
         patch.foto_url = up.url;
         patch.foto_r2_key = up.key;
-        setBusyProgress(100, 100, 'Imagen subida');
+        doneOps++;
+        if (totalOps) setBusyProgress(doneOps, totalOps, `Pasos ${doneOps}/${totalOps}`);
       }
     }
 
+    setBusyMsg('Guardando marcación…');
     const url = SUPABASE_URL.replace(/\/$/,'') + `/rest/v1/marcaciones?id=eq.${encodeURIComponent(id)}`;
     const res = await fetch(url, {
       method:'PATCH',
@@ -1099,17 +1355,69 @@ document.getElementById('editMarkForm').addEventListener('submit', async (e)=>{
 
     const [row] = await res.json();
 
+    if (removeAttachmentIds.length){
+      setBusyMsg('Eliminando adjuntos…');
+      for (const attId of removeAttachmentIds){
+        const currentList = marcacionAdjuntosMap.get(id) || [];
+        const attInfo = currentList.find(a=>a.id===attId);
+        const { error: delErr } = await supabase
+          .from('marcaciones_adjuntos')
+          .delete()
+          .eq('id', attId);
+        if (delErr) throw new Error(delErr.message || 'Error eliminando adjunto');
+        if (attInfo?.r2_key) await deleteFromR2(R2_UPLOADER_URL, attInfo.r2_key);
+        if (currentList.length){
+          marcacionAdjuntosMap.set(id, currentList.filter(a=>a.id!==attId));
+        }
+        doneOps++;
+        if (totalOps) setBusyProgress(doneOps, totalOps, `Pasos ${doneOps}/${totalOps}`);
+      }
+    }
+
+    if (newAttachments.length){
+      for (let i=0;i<newAttachments.length;i++){
+        const att = newAttachments[i];
+        setBusyMsg(`Subiendo adjunto (${i+1}/${newAttachments.length})…`);
+        const keyPath = `marcaciones/${id}/adjuntos/${Date.now()}_${i}_${sanitizePath(att.name)}`;
+        const up = await uploadToR2(R2_UPLOADER_URL, keyPath, att);
+        const { data: insertedAtt, error: attError } = await supabase
+          .from('marcaciones_adjuntos')
+          .insert({
+            marcacion_id: id,
+            nombre: att.name,
+            url: up.url,
+            r2_key: up.key,
+            content_type: att.type || null,
+            size: att.size ?? null
+          })
+          .select()
+          .single();
+        if (attError){
+          await deleteFromR2(R2_UPLOADER_URL, up.key);
+          throw new Error(attError.message || 'Error guardando adjunto');
+        }
+        const list = marcacionAdjuntosMap.get(id) || [];
+        list.unshift(insertedAtt);
+        marcacionAdjuntosMap.set(id, list);
+        doneOps++;
+        if (totalOps) setBusyProgress(doneOps, totalOps, `Pasos ${doneOps}/${totalOps}`);
+      }
+    }
+
     const i = allMarcs.findIndex(x=>x.id===id);
     if (i>=0) allMarcs[i] = row;
     await loadMarcaciones();
 
     msg.textContent = '✅ Guardado';
+    const editAttInput = document.getElementById('emAttachments');
+    if (editAttInput) editAttInput.value='';
     closeModal(document.getElementById('editMarkModal'));
 
-    document.getElementById('viewerTitle').textContent = `Marcación · ${row.nombre}`;
-    if (row.foto_r2_key || row.foto_url){
-      if (row.tipo === '360'){ await open360ForMarcacion(row); }
-      else { await openPhotoForMarcacion(row); }
+    const updatedRow = allMarcs.find(x=>x.id===id) || row;
+    document.getElementById('viewerTitle').textContent = `Marcación · ${updatedRow.nombre}`;
+    if (updatedRow.foto_r2_key || updatedRow.foto_url){
+      if (updatedRow.tipo === '360'){ await open360ForMarcacion(updatedRow); }
+      else { await openPhotoForMarcacion(updatedRow); }
     } else {
       showEmptyViewer();
     }
@@ -1199,6 +1507,7 @@ document.addEventListener('click', (e)=>{ if(!e.target.closest('#searchWrap')) c
 
 /* ===== Inicio ===== */
 (async ()=>{
+  await supabaseSessionReady;
   await loadFotos();
   await loadMarcaciones();
   ensurePanoViewer();

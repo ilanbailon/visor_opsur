@@ -1,1 +1,75 @@
 # visor_opsur
+
+## Supabase (tablas públicas)
+Ejecuta el siguiente script en el editor SQL de Supabase para crear las tablas utilizadas por la aplicación con todo el acceso expuesto al rol `anon` (sin políticas de RLS). Puedes adaptarlo si luego deseas endurecer los permisos.
+
+```sql
+-- Habilita PostGIS una sola vez por proyecto
+create extension if not exists postgis;
+
+-- Tabla de puntos importados desde recorridos
+create table if not exists public.fotos_recorrido (
+  id bigserial primary key,
+  geom geometry(Point, 4326) not null,
+  este double precision,
+  norte double precision,
+  grupo text not null,
+  codigo text not null,
+  progresiva text,
+  numero integer,
+  descripcion text,
+  foto_url text,
+  foto_r2_key text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create index if not exists fotos_recorrido_grupo_idx on public.fotos_recorrido (grupo);
+create index if not exists fotos_recorrido_codigo_idx on public.fotos_recorrido (lower(codigo));
+
+-- Tabla de marcaciones creadas desde la UI
+create table if not exists public.marcaciones (
+  id bigserial primary key,
+  nombre text not null,
+  descripcion text,
+  lat double precision not null,
+  lng double precision not null,
+  geom geometry(Point, 4326) not null,
+  tipo text,
+  foto_url text,
+  foto_r2_key text,
+  created_at timestamptz default now()
+);
+
+create index if not exists marcaciones_geom_idx on public.marcaciones using gist (geom);
+
+-- Adjuntos adicionales por marcación
+create table if not exists public.marcaciones_adjuntos (
+  id bigserial primary key,
+  marcacion_id bigint not null references public.marcaciones(id) on delete cascade,
+  nombre text not null,
+  url text not null,
+  r2_key text,
+  content_type text,
+  size bigint,
+  created_at timestamptz default now()
+);
+
+create index if not exists marcaciones_adjuntos_marcacion_id_idx on public.marcaciones_adjuntos (marcacion_id);
+
+-- Permisos "públicos": deja usar las tablas al rol anon sin RLS
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to anon, authenticated;
+grant usage, select on all sequences in schema public to anon, authenticated;
+```
+
+> **Importante:** Cuando quieras securizar los datos, activa RLS (`alter table ... enable row level security`) y define políticas específicas.
+
+### Autenticación anónima
+
+La aplicación abre una sesión anónima con Supabase para que las inserciones en `marcaciones_adjuntos` funcionen incluso si tu tabla incluye columnas como `created_by default auth.uid() not null`.
+
+1. Ve a **Supabase → Auth → Providers** y habilita la opción **Enable anonymous sign-ins**.
+2. Si ya tienes tablas antiguas con `created_by` sin valor por defecto, ajusta la columna para permitir `null` o define un `default auth.uid()` antes de usar la app.
+
+Sin esto, los adjuntos mostrarán errores de "null value in column `created_by`" al intentar guardarse.
