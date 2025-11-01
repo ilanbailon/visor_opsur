@@ -165,6 +165,14 @@
           </div>
         </div>
 
+        <div class="form-row">
+          <div>
+            <div class="muted">Adjuntos (PDF, Excel, etc.)</div>
+            <input type="file" id="mAttachments" multiple>
+            <div class="muted" style="margin-top:4px">Puedes seleccionar varios archivos.</div>
+          </div>
+        </div>
+
         <div class="form-row cols-2">
           <div>
             <div class="muted">Lat *</div>
@@ -239,6 +247,21 @@
           </div>
         </div>
 
+        <div class="form-row">
+          <div>
+            <div class="muted">Adjuntos actuales</div>
+            <div id="emAttachmentsList" class="attachments-manage muted">—</div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <div class="muted">Agregar adjuntos</div>
+            <input type="file" id="emAttachments" multiple>
+            <div class="muted" style="margin-top:4px">Puedes seleccionar varios archivos.</div>
+          </div>
+        </div>
+
         <div class="actions">
           <button type="button" class="ghost" data-close>Cancelar</button>
           <button type="submit" class="pill">Guardar</button>
@@ -265,6 +288,22 @@
         </div>
       </form>
       <div id="editRecMsg" class="muted" style="margin-top:6px"></div>
+    </div>
+  </div>
+
+  <!-- Modal adjuntos marcación -->
+  <div id="attachmentsModal" class="modal" aria-hidden="true">
+    <div class="backdrop" data-close></div>
+    <div class="content attachments-modal">
+      <h3>Adjuntos de marcación</h3>
+      <div id="attachmentsContent" class="attachments-content">
+        <div id="attachmentsList" class="attachments-list"></div>
+        <div id="attachmentPreview" class="attachments-preview muted">Selecciona un adjunto para previsualizarlo.</div>
+      </div>
+      <div class="actions attachments-actions">
+        <button type="button" class="ghost" data-close>Cerrar</button>
+        <a id="attachmentDownload" class="pill" href="#" target="_blank" rel="noopener" style="display:none">⬇️ Descargar</a>
+      </div>
     </div>
   </div>
 
