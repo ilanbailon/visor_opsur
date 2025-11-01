@@ -418,6 +418,7 @@ function buildSrc(row){
 
 /* ===== Carga de recorridos ===== */
 async function loadFotos(filterText){
+  await supabaseSessionReady;
   setStatus('Cargando recorridos…');
   for (const obj of groups.values()){
     obj.parent.clearLayers(); obj.points.clearLayers(); obj.line=null; obj.rows=[]; obj.bounds=null;
@@ -503,6 +504,7 @@ window.__editRec = (id)=>{
 
 /* ===== Carga de marcaciones ===== */
 async function loadMarcaciones(){
+  await supabaseSessionReady;
   setStatus('Cargando marcaciones…');
   marcacionesCluster.clearLayers();
   const { data, error } = await supabase
@@ -1176,6 +1178,7 @@ async function uploadGroupCsvAndZip(grupo, rowsCsv, zipFile){
   const entries=Object.values(zip.files).filter(f=>!f.dir);
   if(!entries.length) throw new Error('ZIP vacío');
 
+  await supabaseSessionReady;
   const { data: insertedRows, error: insErr } = await supabase
     .from('fotos_recorrido')
     .select('id,codigo')
@@ -1551,6 +1554,7 @@ document.addEventListener('click', (e)=>{ if(!e.target.closest('#searchWrap')) c
 
 /* ===== Inicio ===== */
 (async ()=>{
+  await supabaseSessionReady;
   await loadFotos();
   await loadMarcaciones();
   ensurePanoViewer();
