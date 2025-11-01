@@ -7,6 +7,21 @@ const VIEW = { pitch: 0, yaw: 0, hfov: 108 };
 const HIDE_POINTS_ZOOM = 14;
 
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseSessionReady = ensureSupabaseSession();
+
+async function ensureSupabaseSession(){
+  try{
+    const { data:{ session } } = await supabase.auth.getSession();
+    if (session?.access_token) return session;
+    if (typeof supabase.auth.signInAnonymously !== 'function') return session ?? null;
+    const { data, error } = await supabase.auth.signInAnonymously();
+    if (error) throw error;
+    return data?.session ?? null;
+  }catch(err){
+    console.warn('Supabase: no se pudo iniciar sesión anónima', err);
+    return null;
+  }
+}
 
 /* ====== Busy / Progreso (CSV/ZIP/imagenes) ====== */
 const loading = document.getElementById('loading');
@@ -351,6 +366,7 @@ function buildSrc(row){
 
 /* ===== Carga de recorridos ===== */
 async function loadFotos(filterText){
+  await supabaseSessionReady;
   setStatus('Cargando recorridos…');
   for (const obj of groups.values()){
     obj.parent.clearLayers(); obj.points.clearLayers(); obj.line=null; obj.rows=[]; obj.bounds=null;
@@ -436,6 +452,7 @@ window.__editRec = (id)=>{
 
 /* ===== Carga de marcaciones ===== */
 async function loadMarcaciones(){
+  await supabaseSessionReady;
   setStatus('Cargando marcaciones…');
   marcacionesCluster.clearLayers();
   const { data, error } = await supabase
@@ -1050,6 +1067,10 @@ async function deleteFromR2(workerUrl, key){
     const form = new FormData();
     form.append('key', key);
     const res = await fetch(workerUrl.replace(/\/$/,'') + '/delete', { method:'POST', body: form });
+    if (res.status === 404){
+      console.info('R2: objeto no encontrado (ya eliminado)', key);
+      return false;
+    }
     if (!res.ok){ const t = await res.text().catch(()=> ''); throw new Error(`R2 delete HTTP ${res.status}: ${t}`); }
     return true;
   }catch(err){
@@ -1105,6 +1126,7 @@ async function uploadGroupCsvAndZip(grupo, rowsCsv, zipFile){
   const entries=Object.values(zip.files).filter(f=>!f.dir);
   if(!entries.length) throw new Error('ZIP vacío');
 
+  await supabaseSessionReady;
   const { data: insertedRows, error: insErr } = await supabase
     .from('fotos_recorrido')
     .select('id,codigo')
@@ -1191,6 +1213,10 @@ document.getElementById('markForm').addEventListener('submit', async (e)=>{
   const msg=document.getElementById('markMsg');
   if(!nombre || !Number.isFinite(lat) || !Number.isFinite(lng)){ msg.textContent='Complete nombre y coordenadas válidas.'; return; }
   try{
+    const session = await supabaseSessionReady;
+    if (!session && attachments.length){
+      throw new Error('No se pudo iniciar sesión anónima en Supabase. Revisa Auth → Providers y habilita "Enable anonymous sign-ins".');
+    }
     const totalUploads = (file?1:0) + attachments.length;
     let uploadsDone = 0;
     if (totalUploads){ beginBusy('Subiendo archivos', totalUploads); }
@@ -1283,6 +1309,10 @@ document.getElementById('editMarkForm').addEventListener('submit', async (e)=>{
   const removeAttachmentIds = Array.from(document.querySelectorAll('#emAttachmentsList input[data-remove-id]:checked')).map(el=>Number(el.dataset.removeId)).filter(Boolean);
 
   try{
+    const session = await supabaseSessionReady;
+    if (!session && (newAttachments.length || removeAttachmentIds.length)){
+      throw new Error('No se pudo iniciar sesión anónima en Supabase. Revisa Auth → Providers y habilita "Enable anonymous sign-ins".');
+    }
     const totalUploads = (file?1:0) + newAttachments.length;
     const totalOps = totalUploads + removeAttachmentIds.length;
     const busyLabel = totalOps ? 'Procesando archivos' : 'Guardando cambios';
@@ -1477,6 +1507,7 @@ document.addEventListener('click', (e)=>{ if(!e.target.closest('#searchWrap')) c
 
 /* ===== Inicio ===== */
 (async ()=>{
+  await supabaseSessionReady;
   await loadFotos();
   await loadMarcaciones();
   ensurePanoViewer();

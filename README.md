@@ -64,3 +64,12 @@ grant usage, select on all sequences in schema public to anon, authenticated;
 ```
 
 > **Importante:** Cuando quieras securizar los datos, activa RLS (`alter table ... enable row level security`) y define políticas específicas.
+
+### Autenticación anónima
+
+La aplicación abre una sesión anónima con Supabase para que las inserciones en `marcaciones_adjuntos` funcionen incluso si tu tabla incluye columnas como `created_by default auth.uid() not null`.
+
+1. Ve a **Supabase → Auth → Providers** y habilita la opción **Enable anonymous sign-ins**.
+2. Si ya tienes tablas antiguas con `created_by` sin valor por defecto, ajusta la columna para permitir `null` o define un `default auth.uid()` antes de usar la app.
+
+Sin esto, los adjuntos mostrarán errores de "null value in column `created_by`" al intentar guardarse.
