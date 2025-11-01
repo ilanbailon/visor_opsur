@@ -7,20 +7,72 @@ const VIEW = { pitch: 0, yaw: 0, hfov: 108 };
 const HIDE_POINTS_ZOOM = 14;
 
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const supabaseSessionReady = ensureSupabaseSession();
+let supabaseSessionPromise = null;
+
+function getWindowConfig(name){
+  try{
+    if (typeof window === 'undefined') return undefined;
+    return window[name];
+  }catch(_err){
+    return undefined;
+  }
+}
+
+function resolveCreatedBy(session){
+  if (session?.user?.id) return session.user.id;
+  if (getWindowConfig('SUPABASE_DEFAULT_CREATED_BY') !== undefined){
+    return getWindowConfig('SUPABASE_DEFAULT_CREATED_BY');
+  }
+  return '00000000-0000-0000-0000-000000000000';
+}
+
+function shouldAttemptAnonymousSession(){
+  const fallback = resolveCreatedBy(null);
+  return fallback == null || fallback === '';
+}
 
 async function ensureSupabaseSession(){
-  try{
-    const { data:{ session } } = await supabase.auth.getSession();
-    if (session?.access_token) return session;
-    if (typeof supabase.auth.signInAnonymously !== 'function') return session ?? null;
-    const { data, error } = await supabase.auth.signInAnonymously();
-    if (error) throw error;
-    return data?.session ?? null;
-  }catch(err){
-    console.warn('Supabase: no se pudo iniciar sesión anónima', err);
-    return null;
+  if (supabaseSessionPromise) return supabaseSessionPromise;
+  if (!shouldAttemptAnonymousSession()){ return Promise.resolve(null); }
+  supabaseSessionPromise = (async ()=>{
+    try{
+      const { data:{ session } } = await supabase.auth.getSession();
+      if (session?.access_token) return session;
+      if (typeof supabase.auth.signInAnonymously !== 'function') return session ?? null;
+      const { data, error } = await supabase.auth.signInAnonymously();
+      if (error) throw error;
+      return data?.session ?? null;
+    }catch(err){
+      console.warn('Supabase: no se pudo iniciar sesión anónima', err);
+      return null;
+    }
+  })();
+  return supabaseSessionPromise;
+}
+
+async function insertMarcacionAdjunto(record, session){
+  const payload = { ...record };
+  const createdBy = resolveCreatedBy(session);
+  if (createdBy != null && createdBy !== ''){
+    payload.created_by = createdBy;
   }
+  let { data, error } = await supabase
+    .from('marcaciones_adjuntos')
+    .insert(payload)
+    .select()
+    .single();
+  if (error && payload.created_by !== undefined){
+    const msg = String(error.message || '').toLowerCase();
+    if (msg.includes('created_by')){
+      const { created_by, ...withoutCreatedBy } = payload;
+      ({ data, error } = await supabase
+        .from('marcaciones_adjuntos')
+        .insert(withoutCreatedBy)
+        .select()
+        .single());
+    }
+  }
+  return { data, error };
 }
 
 /* ====== Busy / Progreso (CSV/ZIP/imagenes) ====== */
@@ -1213,9 +1265,10 @@ document.getElementById('markForm').addEventListener('submit', async (e)=>{
   const msg=document.getElementById('markMsg');
   if(!nombre || !Number.isFinite(lat) || !Number.isFinite(lng)){ msg.textContent='Complete nombre y coordenadas válidas.'; return; }
   try{
-    const session = await supabaseSessionReady;
-    if (!session && attachments.length){
-      throw new Error('No se pudo iniciar sesión anónima en Supabase. Revisa Auth → Providers y habilita "Enable anonymous sign-ins".');
+    const session = attachments.length ? await ensureSupabaseSession() : null;
+    const createdByForAdjuntos = resolveCreatedBy(session);
+    if (attachments.length && (createdByForAdjuntos == null || createdByForAdjuntos === '')){
+      throw new Error('Configura window.SUPABASE_DEFAULT_CREATED_BY o habilita los anonymous sign-ins en Supabase para guardar adjuntos.');
     }
     const totalUploads = (file?1:0) + attachments.length;
     let uploadsDone = 0;
@@ -1245,18 +1298,14 @@ document.getElementById('markForm').addEventListener('submit', async (e)=>{
         setBusyMsg(`Subiendo adjunto (${i+1}/${attachments.length})…`);
         const keyPath=`marcaciones/${row.id}/adjuntos/${Date.now()}_${i}_${sanitizePath(att.name)}`;
         const up = await uploadToR2(R2_UPLOADER_URL, keyPath, att);
-        const { data: inserted, error: attError } = await supabase
-          .from('marcaciones_adjuntos')
-          .insert({
-            marcacion_id: row.id,
-            nombre: att.name,
-            url: up.url,
-            r2_key: up.key,
-            content_type: att.type || null,
-            size: att.size ?? null
-          })
-          .select()
-          .single();
+        const { data: inserted, error: attError } = await insertMarcacionAdjunto({
+          marcacion_id: row.id,
+          nombre: att.name,
+          url: up.url,
+          r2_key: up.key,
+          content_type: att.type || null,
+          size: att.size ?? null
+        }, session);
         if (attError){
           await deleteFromR2(R2_UPLOADER_URL, up.key);
           throw new Error(attError.message || 'Error guardando adjunto');
@@ -1309,9 +1358,11 @@ document.getElementById('editMarkForm').addEventListener('submit', async (e)=>{
   const removeAttachmentIds = Array.from(document.querySelectorAll('#emAttachmentsList input[data-remove-id]:checked')).map(el=>Number(el.dataset.removeId)).filter(Boolean);
 
   try{
-    const session = await supabaseSessionReady;
-    if (!session && (newAttachments.length || removeAttachmentIds.length)){
-      throw new Error('No se pudo iniciar sesión anónima en Supabase. Revisa Auth → Providers y habilita "Enable anonymous sign-ins".');
+    const needSession = newAttachments.length > 0;
+    const session = needSession ? await ensureSupabaseSession() : null;
+    const createdByForAdjuntos = resolveCreatedBy(session);
+    if (needSession && (createdByForAdjuntos == null || createdByForAdjuntos === '')){
+      throw new Error('Configura window.SUPABASE_DEFAULT_CREATED_BY o habilita los anonymous sign-ins en Supabase para guardar adjuntos.');
     }
     const totalUploads = (file?1:0) + newAttachments.length;
     const totalOps = totalUploads + removeAttachmentIds.length;
@@ -1380,18 +1431,14 @@ document.getElementById('editMarkForm').addEventListener('submit', async (e)=>{
         setBusyMsg(`Subiendo adjunto (${i+1}/${newAttachments.length})…`);
         const keyPath = `marcaciones/${id}/adjuntos/${Date.now()}_${i}_${sanitizePath(att.name)}`;
         const up = await uploadToR2(R2_UPLOADER_URL, keyPath, att);
-        const { data: insertedAtt, error: attError } = await supabase
-          .from('marcaciones_adjuntos')
-          .insert({
-            marcacion_id: id,
-            nombre: att.name,
-            url: up.url,
-            r2_key: up.key,
-            content_type: att.type || null,
-            size: att.size ?? null
-          })
-          .select()
-          .single();
+        const { data: insertedAtt, error: attError } = await insertMarcacionAdjunto({
+          marcacion_id: id,
+          nombre: att.name,
+          url: up.url,
+          r2_key: up.key,
+          content_type: att.type || null,
+          size: att.size ?? null
+        }, session);
         if (attError){
           await deleteFromR2(R2_UPLOADER_URL, up.key);
           throw new Error(attError.message || 'Error guardando adjunto');

@@ -65,11 +65,15 @@ grant usage, select on all sequences in schema public to anon, authenticated;
 
 > **Importante:** Cuando quieras securizar los datos, activa RLS (`alter table ... enable row level security`) y define políticas específicas.
 
-### Autenticación anónima
+### Adjuntos y `created_by`
 
-La aplicación abre una sesión anónima con Supabase para que las inserciones en `marcaciones_adjuntos` funcionen incluso si tu tabla incluye columnas como `created_by default auth.uid() not null`.
+Para evitar el error `null value in column "created_by"` cuando la tabla `marcaciones_adjuntos` exige un valor, la aplicación asigna por defecto el identificador `00000000-0000-0000-0000-000000000000`. Si prefieres usar otro valor (por ejemplo, un UUID de servicio propio), declara la variable global antes de cargar `app.js`:
 
-1. Ve a **Supabase → Auth → Providers** y habilita la opción **Enable anonymous sign-ins**.
-2. Si ya tienes tablas antiguas con `created_by` sin valor por defecto, ajusta la columna para permitir `null` o define un `default auth.uid()` antes de usar la app.
+```html
+<script>
+  window.SUPABASE_DEFAULT_CREATED_BY = 'mi-uuid-de-servicio';
+</script>
+<script src="app.js" type="module"></script>
+```
 
-Sin esto, los adjuntos mostrarán errores de "null value in column `created_by`" al intentar guardarse.
+Si deseas que cada usuario quede registrado con su `auth.uid()`, establece `window.SUPABASE_DEFAULT_CREATED_BY = null` para que la app intente abrir una sesión anónima usando **Supabase → Auth → Providers → Enable anonymous sign-ins**. Cuando esa opción está deshabilitada, la aplicación continuará funcionando con el valor fijo configurado.
