@@ -103,6 +103,38 @@ button, input, select, textarea{
 .muted{ color:#94a3b8; font-size:12px }
 .actions{ display:flex; gap:8px; justify-content:flex-end }
 
+/* Adjuntos marcaciones */
+.attachments-modal{ width:min(96vw,820px); display:flex; flex-direction:column; gap:14px; }
+.attachments-content{ display:flex; flex-direction:column; gap:12px; }
+.attachments-list{ display:flex; flex-direction:column; gap:6px; max-height:320px; overflow:auto; background:#0b1329; padding:10px; border-radius:10px; border:1px solid #1f2a44; }
+.attachments-item{ display:flex; align-items:center; gap:10px; padding:8px; border-radius:10px; border:1px solid transparent; background:rgba(15,23,42,.6); cursor:pointer; transition:background .2s ease, border-color .2s ease; }
+.attachments-item:hover{ background:rgba(14,165,233,.15); }
+.attachments-item.active{ border-color:#38bdf8; background:rgba(14,165,233,.25); }
+.attachments-item .name{ flex:1; font-size:14px; color:#e2e8f0; }
+.attachments-item .meta{ font-size:11px; color:#94a3b8; }
+.attachments-preview{ min-height:220px; border:1px dashed #1f2a44; border-radius:12px; display:flex; align-items:center; justify-content:center; padding:12px; background:#0b1224; }
+.attachments-preview iframe{ width:100%; height:360px; border:none; border-radius:10px; background:#111827; }
+.attachments-preview img{ max-width:100%; max-height:360px; border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
+.attachments-preview .unavailable{ text-align:center; }
+.attachments-actions{ justify-content:space-between; align-items:center; }
+.attachments-actions .pill{ text-decoration:none; }
+.attachments-manage{ display:flex; flex-direction:column; gap:6px; padding:10px; border-radius:10px; border:1px solid #1f2a44; background:#0b1329; max-height:220px; overflow:auto; }
+.attachments-manage .item{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 8px; border-radius:8px; border:1px solid rgba(148,163,184,.2); background:rgba(15,23,42,.7); }
+.attachments-manage .item label{ display:flex; align-items:center; gap:6px; font-size:12px; color:#e2e8f0; cursor:pointer; }
+.attachments-manage .item button{ border:none; background:none; color:#38bdf8; font-size:12px; cursor:pointer; padding:0; }
+.attachments-manage .empty{ font-style:italic; }
+.popup-attachments{ margin-top:6px; font-size:12px; }
+.popup-attachments .title{ color:#94a3b8; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:4px; }
+.popup-attachments-list{ display:flex; flex-direction:column; gap:4px; }
+.popup-attachments-list button{ border:none; background:none; color:#38bdf8; text-align:left; padding:0; font-size:12px; cursor:pointer; }
+.popup-attachments .view-all{ margin-top:6px; }
+
+@media (min-width:720px){
+  .attachments-content{ flex-direction:row; }
+  .attachments-list{ flex:0 0 280px; }
+  .attachments-preview{ flex:1; min-height:320px; }
+}
+
 /* Overlay de carga para el visor (foto / 360) */
 #viewerLoading{
   position:absolute; inset:0;
