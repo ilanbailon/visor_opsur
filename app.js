@@ -207,8 +207,7 @@ function buildPopupAttachmentsHTML(list){
     const link = url
       ? `<a href="${url}" target="_blank" rel="noopener"${titleAttr}>📎 ${displayName}</a>`
       : `<span${titleAttr}>${displayName}</span>`;
-    const meta = att.mime_type ? `<span class="attach-meta">${esc(att.mime_type)}</span>` : '';
-    return `<li class="attach-item">${link}${meta}</li>`;
+    return `<li class="attach-item">${link}</li>`;
   }).join('');
   return `<ul class="popup-attachments">${items}</ul>`;
 }
@@ -272,8 +271,9 @@ function renderAttachmentsPanelFor(marcacionId){
       const fullName = getAttachmentName(att);
       const name = esc(getAttachmentDisplayName(att));
       const titleAttr = fullName ? ` title="${esc(fullName)}"` : '';
-      const meta = att.mime_type ? `<span class="attach-meta">${esc(att.mime_type)}</span>` : '';
-      li.innerHTML = `${url ? `<a href="${url}" target="_blank" rel="noopener"${titleAttr}>📎 ${name}</a>` : `<span${titleAttr}>${name}</span>`}${meta}`;
+      li.innerHTML = url
+        ? `<a href="${url}" target="_blank" rel="noopener"${titleAttr}>📎 ${name}</a>`
+        : `<span${titleAttr}>${name}</span>`;
       attachmentsListEl.appendChild(li);
     }
   }
@@ -300,8 +300,10 @@ function renderEditAttachments(marcacionId){
     const fullName = getAttachmentName(att);
     const name = esc(getAttachmentDisplayName(att));
     const titleAttr = fullName ? ` title="${esc(fullName)}"` : '';
-    const meta = att.mime_type ? `<span class="attach-meta">${esc(att.mime_type)}</span>` : '';
-    li.innerHTML = `${url ? `<a href="${url}" target="_blank" rel="noopener"${titleAttr}>📎 ${name}</a>` : `<span${titleAttr}>${name}</span>`}${meta}` +
+    li.innerHTML = (url
+      ? `<a href="${url}" target="_blank" rel="noopener"${titleAttr}>📎 ${name}</a>`
+      : `<span${titleAttr}>${name}</span>`)
+      +
       `<button type="button" class="attach-remove" data-attach-id="${att.id}" data-attach-mar="${att.marcacion_id}">Eliminar</button>`;
     emAttachListEl.appendChild(li);
   }
