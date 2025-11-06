@@ -112,6 +112,22 @@ function getAttachmentName(att){
   return 'Archivo';
 }
 
+function getAttachmentDisplayName(att){
+  const full = String(getAttachmentName(att) || '').trim();
+  if (!full) return 'Archivo';
+  if (full.length <= 28) return full;
+  const dot = full.lastIndexOf('.');
+  const hasExt = dot > 0 && dot < full.length - 1;
+  const ext = hasExt ? full.slice(dot) : '';
+  const base = hasExt ? full.slice(0, dot) : full;
+  const prefixLength = 12;
+  let visible = base.slice(0, prefixLength);
+  if (visible.length < base.length) visible = visible.replace(/\s+$/,'');
+  if (!visible) visible = base.slice(0, prefixLength);
+  if (visible.length < base.length) visible += '…';
+  return `${visible}${ext}`;
+}
+
 function buildAttachmentSrc(att){
   if (!att) return '';
   const base = R2_UPLOADER_URL.replace(/\/$/,'');
@@ -185,8 +201,12 @@ function buildPopupAttachmentsHTML(list){
   }
   const items = list.map((att)=>{
     const url = buildAttachmentSrc(att);
-    const name = esc(getAttachmentName(att));
-    const link = url ? `<a href="${url}" target="_blank" rel="noopener">📎 ${name}</a>` : `<span>${name}</span>`;
+    const fullName = getAttachmentName(att);
+    const displayName = esc(getAttachmentDisplayName(att));
+    const titleAttr = fullName ? ` title="${esc(fullName)}"` : '';
+    const link = url
+      ? `<a href="${url}" target="_blank" rel="noopener"${titleAttr}>📎 ${displayName}</a>`
+      : `<span${titleAttr}>${displayName}</span>`;
     const meta = att.mime_type ? `<span class="attach-meta">${esc(att.mime_type)}</span>` : '';
     return `<li class="attach-item">${link}${meta}</li>`;
   }).join('');
@@ -249,9 +269,11 @@ function renderAttachmentsPanelFor(marcacionId){
       const li = document.createElement('li');
       li.className = 'attach-item';
       const url = buildAttachmentSrc(att);
-      const name = esc(getAttachmentName(att));
+      const fullName = getAttachmentName(att);
+      const name = esc(getAttachmentDisplayName(att));
+      const titleAttr = fullName ? ` title="${esc(fullName)}"` : '';
       const meta = att.mime_type ? `<span class="attach-meta">${esc(att.mime_type)}</span>` : '';
-      li.innerHTML = `${url ? `<a href="${url}" target="_blank" rel="noopener">📎 ${name}</a>` : `<span>${name}</span>`}${meta}`;
+      li.innerHTML = `${url ? `<a href="${url}" target="_blank" rel="noopener"${titleAttr}>📎 ${name}</a>` : `<span${titleAttr}>${name}</span>`}${meta}`;
       attachmentsListEl.appendChild(li);
     }
   }
@@ -275,9 +297,11 @@ function renderEditAttachments(marcacionId){
     const li = document.createElement('li');
     li.className = 'attach-item';
     const url = buildAttachmentSrc(att);
-    const name = esc(getAttachmentName(att));
+    const fullName = getAttachmentName(att);
+    const name = esc(getAttachmentDisplayName(att));
+    const titleAttr = fullName ? ` title="${esc(fullName)}"` : '';
     const meta = att.mime_type ? `<span class="attach-meta">${esc(att.mime_type)}</span>` : '';
-    li.innerHTML = `${url ? `<a href="${url}" target="_blank" rel="noopener">📎 ${name}</a>` : `<span>${name}</span>`}${meta}` +
+    li.innerHTML = `${url ? `<a href="${url}" target="_blank" rel="noopener"${titleAttr}>📎 ${name}</a>` : `<span${titleAttr}>${name}</span>`}${meta}` +
       `<button type="button" class="attach-remove" data-attach-id="${att.id}" data-attach-mar="${att.marcacion_id}">Eliminar</button>`;
     emAttachListEl.appendChild(li);
   }
