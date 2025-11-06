@@ -52,6 +52,49 @@ button, input, select, textarea{
 #photoContainer.show{ opacity:1; pointer-events:auto; }
 #photoContainer img{ max-width:100%; max-height:100%; border-radius:6px; transition: transform .2s ease; }
 
+#attachmentsPanel{
+  display:none;
+  padding:12px;
+  border-top:1px solid #12203a;
+  background:#0a0f1f;
+  gap:8px;
+}
+#attachmentsPanel.show{ display:flex; flex-direction:column; }
+.panel-title{ font-size:13px; font-weight:600; color:#cbd5e1; }
+.attach-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.attach-item{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  background:#0f172a;
+  border:1px solid #1f2a44;
+  border-radius:10px;
+  padding:6px 8px;
+}
+.attach-item a{
+  color:#38bdf8;
+  text-decoration:none;
+  flex:1;
+  word-break:break-word;
+}
+.attach-item a:hover{ text-decoration:underline; }
+.attach-meta{ font-size:11px; color:#94a3b8; }
+.attach-remove{
+  border:none;
+  background:transparent;
+  color:#fca5a5;
+  cursor:pointer;
+  font-size:12px;
+}
+.attach-remove:hover{ color:#f87171; }
+
+.popup-attachments{ list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:4px; }
+.popup-attachments .attach-item{ background:transparent; border:none; padding:0; }
+.popup-attachments .attach-item a{ color:#c4b5fd; font-size:12px; }
+.popup-attachments .attach-item span{ color:#cbd5e1; font-size:12px; }
+.popup-attachments .attach-meta{ font-size:10px; margin-left:6px; }
+.popup-attachments.muted{ color:#94a3b8; font-size:12px; margin-top:8px; }
+
 /* Recorrido: vértices y línea */
 .vtx-point { stroke:#0f172a; stroke-width:1.5px; fill:#38bdf8; fill-opacity:.95; }
 .vtx-has-desc { stroke:#7c2d12; fill:#f97316; }
