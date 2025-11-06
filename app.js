@@ -135,6 +135,10 @@ function setAttachmentsCache(rows){
   for (const list of attachmentsByMarcacion.values()){
     list.sort((a,b)=> new Date(a.created_at||0) - new Date(b.created_at||0));
   }
+  for (const id of attachmentsByMarcacion.keys()){
+    refreshMarcacionMarkerIcon(id);
+    refreshMarcacionMarkerPopup(id);
+  }
 }
 
 function appendAttachmentsToCache(rows){
@@ -148,6 +152,7 @@ function appendAttachmentsToCache(rows){
   }
   for (const id of touched){
     refreshMarcacionMarkerIcon(id);
+    refreshMarcacionMarkerPopup(id);
     if (currentMarcacionId === id) renderAttachmentsPanelFor(id);
   }
 }
@@ -157,6 +162,7 @@ function removeAttachmentFromCache(attId, marcacionId){
   const list = (attachmentsByMarcacion.get(marcacionId) || []).filter(att => att.id !== attId);
   attachmentsByMarcacion.set(marcacionId, list);
   refreshMarcacionMarkerIcon(marcacionId);
+  refreshMarcacionMarkerPopup(marcacionId);
   if (currentMarcacionId === marcacionId) renderAttachmentsPanelFor(marcacionId);
 }
 
@@ -173,12 +179,43 @@ function hasMarcacionAttachments(marcacionId){
   return (attachmentsByMarcacion.get(marcacionId) || []).length > 0;
 }
 
+function buildPopupAttachmentsHTML(list){
+  if (!Array.isArray(list) || !list.length){
+    return '<div class="popup-attachments muted">Sin adjuntos</div>';
+  }
+  const items = list.map((att)=>{
+    const url = buildAttachmentSrc(att);
+    const name = esc(getAttachmentName(att));
+    const link = url ? `<a href="${url}" target="_blank" rel="noopener">📎 ${name}</a>` : `<span>${name}</span>`;
+    const meta = att.mime_type ? `<span class="attach-meta">${esc(att.mime_type)}</span>` : '';
+    return `<li class="attach-item">${link}${meta}</li>`;
+  }).join('');
+  return `<ul class="popup-attachments">${items}</ul>`;
+}
+
+function buildMarcacionPopupHTML(row){
+  const desc = row.descripcion ? `<br><em>${esc(row.descripcion)}</em>` : '';
+  const attachments = attachmentsByMarcacion.get(row.id) || [];
+  const attachmentsHtml = buildPopupAttachmentsHTML(attachments);
+  const header = `<b>${esc(row.nombre ?? 'Sin nombre')}</b>${desc}<br><small>${esc(row.tipo || 'sin imagen')}</small>`;
+  const actions = `<div style="margin-top:6px"><button class="ghost" onclick="window.__editMark(${row.id});return false;">✎ Editar</button></div>`;
+  return `${header}${attachmentsHtml}${actions}`;
+}
+
 function refreshMarcacionMarkerIcon(marcacionId){
   const marker = marcacionMarkerById.get(marcacionId);
   if (!marker) return;
   const row = allMarcs.find(x=>x.id===marcacionId);
   if (!row) return;
   marker.setIcon(getMarcacionIcon(row.tipo, hasMarcacionAttachments(marcacionId)));
+}
+
+function refreshMarcacionMarkerPopup(marcacionId){
+  const marker = marcacionMarkerById.get(marcacionId);
+  if (!marker) return;
+  const row = allMarcs.find(x=>x.id===marcacionId);
+  if (!row) return;
+  marker.setPopupContent(buildMarcacionPopupHTML(row));
 }
 
 async function fetchMarcacionAttachments(){
@@ -362,7 +399,7 @@ function ensureGroupStruct(name){
 /* ===== Marcaciones (cluster) ===== */
 function buildMarcacionSVG({ fill, stroke, emoji, emojiColor = '#001219', hasAttachments }){
   const badge = hasAttachments
-    ? `<circle cx="22" cy="6" r="6" fill="#a855f7" stroke="#6b21a8" stroke-width="1.5"/><text x="22" y="8.6" font-family="sans-serif" font-size="9" text-anchor="middle" fill="#f5f3ff">📎</text>`
+    ? `<circle cx="23" cy="7" r="7" fill="#a855f7" stroke="#6b21a8" stroke-width="1.8"/><text x="23" y="9.2" font-family="sans-serif" font-size="10" text-anchor="middle" fill="#f5f3ff">📎</text>`
     : '';
   const emojiLayer = emoji
     ? `<text x="14" y="18" font-family="sans-serif" font-size="14" text-anchor="middle" fill="${emojiColor}">${emoji}</text>`
@@ -533,10 +570,7 @@ async function loadMarcaciones(){
 function addMarcacionMarker(row){
   const lat=Number(row.lat), lng=Number(row.lng); if(!Number.isFinite(lat)||!Number.isFinite(lng)) return;
   const icon=getMarcacionIcon(row.tipo, hasMarcacionAttachments(row.id));
-  const html = `<b>${esc(row.nombre ?? 'Sin nombre')}</b>${row.descripcion? `<br><em>${esc(row.descripcion)}</em>`:''}
-                <br><small>${esc(row.tipo||'sin imagen')}</small>
-                <br><small>id: ${row.id} · ${lat.toFixed(6)}, ${lng.toFixed(6)}</small>
-                <div style="margin-top:6px"><button class="ghost" onclick="window.__editMark(${row.id});return false;">✎ Editar</button></div>`;
+  const html = buildMarcacionPopupHTML(row);
   const m=L.marker([lat,lng],{icon}).bindPopup(html);
   m.on('click', async ()=>{
     setCurrentMarcacion(row.id);
