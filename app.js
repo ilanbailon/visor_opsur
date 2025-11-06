@@ -451,7 +451,7 @@ async function loadMarcaciones(){
       .select('id,nombre,descripcion,lat,lng,tipo,foto_url,foto_r2_key,created_at')
       .order('id'),
     supabase
-      .from('marcacion_adjuntos')
+      .from('marcaciones_adjuntos')
       .select('id,marcacion_id,nombre,archivo_url,archivo_r2_key,mime_type,created_at')
       .order('created_at')
   ]);
@@ -1041,7 +1041,7 @@ async function uploadToR2(workerUrl, keyPath, file){
   return res.json(); // { url, key }
 }
 async function insertAttachmentRow(payload){
-  const url = SUPABASE_URL.replace(/\/$/,'') + '/rest/v1/marcacion_adjuntos?select=*';
+  const url = SUPABASE_URL.replace(/\/$/,'') + '/rest/v1/marcaciones_adjuntos?select=*';
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -1081,7 +1081,7 @@ async function uploadAttachmentsForMarcacion(marcacionId, files, onProgress){
   return results;
 }
 async function deleteAttachment(attId){
-  const url = SUPABASE_URL.replace(/\/$/,'') + `/rest/v1/marcacion_adjuntos?id=eq.${encodeURIComponent(attId)}`;
+  const url = SUPABASE_URL.replace(/\/$/,'') + `/rest/v1/marcaciones_adjuntos?id=eq.${encodeURIComponent(attId)}`;
   const res = await fetch(url, {
     method: 'DELETE',
     headers: {
