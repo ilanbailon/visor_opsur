@@ -138,11 +138,17 @@ function setAttachmentsCache(rows){
 }
 
 function appendAttachmentsToCache(rows){
+  const touched = new Set();
   for (const att of rows || []){
     const list = attachmentsByMarcacion.get(att.marcacion_id) || [];
     list.push(att);
     list.sort((a,b)=> new Date(a.created_at||0) - new Date(b.created_at||0));
     attachmentsByMarcacion.set(att.marcacion_id, list);
+    touched.add(att.marcacion_id);
+  }
+  for (const id of touched){
+    refreshMarcacionMarkerIcon(id);
+    if (currentMarcacionId === id) renderAttachmentsPanelFor(id);
   }
 }
 
@@ -150,6 +156,8 @@ function removeAttachmentFromCache(attId, marcacionId){
   if (!attachmentsByMarcacion.has(marcacionId)) return;
   const list = (attachmentsByMarcacion.get(marcacionId) || []).filter(att => att.id !== attId);
   attachmentsByMarcacion.set(marcacionId, list);
+  refreshMarcacionMarkerIcon(marcacionId);
+  if (currentMarcacionId === marcacionId) renderAttachmentsPanelFor(marcacionId);
 }
 
 function isMissingR2KeyError(err){
@@ -159,6 +167,18 @@ function isMissingR2KeyError(err){
   }
   const parts = [err.message, err.details, err.hint].filter(Boolean).join(' ').toLowerCase();
   return parts.includes('archivo_r2_key');
+}
+
+function hasMarcacionAttachments(marcacionId){
+  return (attachmentsByMarcacion.get(marcacionId) || []).length > 0;
+}
+
+function refreshMarcacionMarkerIcon(marcacionId){
+  const marker = marcacionMarkerById.get(marcacionId);
+  if (!marker) return;
+  const row = allMarcs.find(x=>x.id===marcacionId);
+  if (!row) return;
+  marker.setIcon(getMarcacionIcon(row.tipo, hasMarcacionAttachments(marcacionId)));
 }
 
 async function fetchMarcacionAttachments(){
@@ -340,15 +360,25 @@ function ensureGroupStruct(name){
 }
 
 /* ===== Marcaciones (cluster) ===== */
-function getMarcacionIcon(tipo){
+function buildMarcacionSVG({ fill, stroke, emoji, emojiColor = '#001219', hasAttachments }){
+  const badge = hasAttachments
+    ? `<circle cx="22" cy="6" r="6" fill="#a855f7" stroke="#6b21a8" stroke-width="1.5"/><text x="22" y="8.6" font-family="sans-serif" font-size="9" text-anchor="middle" fill="#f5f3ff">📎</text>`
+    : '';
+  const emojiLayer = emoji
+    ? `<text x="14" y="18" font-family="sans-serif" font-size="14" text-anchor="middle" fill="${emojiColor}">${emoji}</text>`
+    : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="${fill}" stroke="${stroke}" stroke-width="2"/>${badge}${emojiLayer}</svg>`;
+}
+
+function getMarcacionIcon(tipo, hasAttachments){
   if (tipo === '360') {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="#0ea5e9" stroke="#0c4a6e" stroke-width="2"/><text x="14" y="18" font-family="sans-serif" font-size="14" text-anchor="middle" fill="#001219">🕶️</text></svg>`;
+    const svg = buildMarcacionSVG({ fill:'#0ea5e9', stroke:'#0c4a6e', emoji:'🕶️', emojiColor:'#001219', hasAttachments });
     return L.divIcon({ html: svg, className: '', iconSize:[28,28], iconAnchor:[14,14] });
   } else if (tipo === 'foto') {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="#f59e0b" stroke="#78350f" stroke-width="2"/><text x="14" y="18" font-family="sans-serif" font-size="14" text-anchor="middle" fill="#1f1300">📷</text></svg>`;
+    const svg = buildMarcacionSVG({ fill:'#f59e0b', stroke:'#78350f', emoji:'📷', emojiColor:'#1f1300', hasAttachments });
     return L.divIcon({ html: svg, className: '', iconSize:[28,28], iconAnchor:[14,14] });
   }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="#e5e7eb" stroke="#6b7280" stroke-width="2"/></svg>`;
+  const svg = buildMarcacionSVG({ fill:'#e5e7eb', stroke:'#6b7280', emoji:'', hasAttachments });
   return L.divIcon({ html: svg, className: '', iconSize:[28,28], iconAnchor:[14,14] });
 }
 
@@ -366,6 +396,7 @@ setTimeout(enhanceOverlayControlZoomButtons, 50);
 let allRows = [];            // fotos_recorrido
 let allMarcs = [];           // marcaciones
 const markerById = new Map();// recorrido: id -> circleMarker
+const marcacionMarkerById = new Map();
 let routeLayerActive = null;
 
 const BASE_VERTEX_STYLE = { radius:7, weight:1.8, opacity:.95, fillOpacity:.95 };
@@ -470,6 +501,7 @@ window.__editRec = (id)=>{
 async function loadMarcaciones(){
   setStatus('Cargando marcaciones…');
   marcacionesCluster.clearLayers();
+  marcacionMarkerById.clear();
   const [marcsRes, attachRes] = await Promise.all([
     supabase
       .from('marcaciones')
@@ -500,7 +532,7 @@ async function loadMarcaciones(){
 
 function addMarcacionMarker(row){
   const lat=Number(row.lat), lng=Number(row.lng); if(!Number.isFinite(lat)||!Number.isFinite(lng)) return;
-  const icon=getMarcacionIcon(row.tipo);
+  const icon=getMarcacionIcon(row.tipo, hasMarcacionAttachments(row.id));
   const html = `<b>${esc(row.nombre ?? 'Sin nombre')}</b>${row.descripcion? `<br><em>${esc(row.descripcion)}</em>`:''}
                 <br><small>${esc(row.tipo||'sin imagen')}</small>
                 <br><small>id: ${row.id} · ${lat.toFixed(6)}, ${lng.toFixed(6)}</small>
@@ -518,6 +550,7 @@ function addMarcacionMarker(row){
     }
   });
   marcacionesCluster.addLayer(m);
+  marcacionMarkerById.set(row.id, m);
   return m;
 }
 window.__editMark = (id)=>{
