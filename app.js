@@ -17,8 +17,15 @@ const busyBadge = document.getElementById('busyBadge');
 const busyText = document.getElementById('busyText');
 const btnCancelBusy = document.getElementById('btnCancelBusy');
 const btnHideBusy = document.getElementById('btnHideBusy');
+const attachmentsPanel = document.getElementById('attachmentsPanel');
+const attachmentsListEl = document.getElementById('attachmentsList');
+const attachmentsEmptyEl = document.getElementById('attachmentsEmpty');
+const emAttachListEl = document.getElementById('emAttachList');
 
 let currentBusy = { active:false, label:'', cancel:false, total:0, done:0 };
+let currentMarcacionId = null;
+let attachmentsByMarcacion = new Map();
+let attachmentsSupportsR2Key = true;
 
 function beginBusy(label, total=0){
   currentBusy = { active:true, label, cancel:false, total, done:0 };
@@ -96,6 +103,176 @@ function hideViewerLoading(){
   if (!viewerLoading) return;
   viewerLoading.classList.remove('show');
 }
+
+function getAttachmentName(att){
+  if (!att) return 'Archivo';
+  if (att.nombre && String(att.nombre).trim()) return att.nombre;
+  if (att.archivo_r2_key) return String(att.archivo_r2_key).split('/').pop();
+  if (att.archivo_url) return String(att.archivo_url).split('/').pop();
+  return 'Archivo';
+}
+
+function buildAttachmentSrc(att){
+  if (!att) return '';
+  const base = R2_UPLOADER_URL.replace(/\/$/,'');
+  if (att.archivo_r2_key){
+    const key = String(att.archivo_r2_key);
+    return `${base}/raw-public/${encodeURI(key)}`;
+  }
+  if (att.archivo_url){
+    return `${base}/raw?url=${encodeURIComponent(att.archivo_url)}`;
+  }
+  return '';
+}
+
+function setAttachmentsCache(rows){
+  attachmentsByMarcacion = new Map();
+  for (const att of rows || []){
+    const list = attachmentsByMarcacion.get(att.marcacion_id) || [];
+    list.push(att);
+    attachmentsByMarcacion.set(att.marcacion_id, list);
+  }
+  for (const list of attachmentsByMarcacion.values()){
+    list.sort((a,b)=> new Date(a.created_at||0) - new Date(b.created_at||0));
+  }
+}
+
+function appendAttachmentsToCache(rows){
+  const touched = new Set();
+  for (const att of rows || []){
+    const list = attachmentsByMarcacion.get(att.marcacion_id) || [];
+    list.push(att);
+    list.sort((a,b)=> new Date(a.created_at||0) - new Date(b.created_at||0));
+    attachmentsByMarcacion.set(att.marcacion_id, list);
+    touched.add(att.marcacion_id);
+  }
+  for (const id of touched){
+    refreshMarcacionMarkerIcon(id);
+    if (currentMarcacionId === id) renderAttachmentsPanelFor(id);
+  }
+}
+
+function removeAttachmentFromCache(attId, marcacionId){
+  if (!attachmentsByMarcacion.has(marcacionId)) return;
+  const list = (attachmentsByMarcacion.get(marcacionId) || []).filter(att => att.id !== attId);
+  attachmentsByMarcacion.set(marcacionId, list);
+  refreshMarcacionMarkerIcon(marcacionId);
+  if (currentMarcacionId === marcacionId) renderAttachmentsPanelFor(marcacionId);
+}
+
+function isMissingR2KeyError(err){
+  if (!err) return false;
+  if (typeof err === 'string'){
+    return err.toLowerCase().includes('archivo_r2_key');
+  }
+  const parts = [err.message, err.details, err.hint].filter(Boolean).join(' ').toLowerCase();
+  return parts.includes('archivo_r2_key');
+}
+
+function hasMarcacionAttachments(marcacionId){
+  return (attachmentsByMarcacion.get(marcacionId) || []).length > 0;
+}
+
+function refreshMarcacionMarkerIcon(marcacionId){
+  const marker = marcacionMarkerById.get(marcacionId);
+  if (!marker) return;
+  const row = allMarcs.find(x=>x.id===marcacionId);
+  if (!row) return;
+  marker.setIcon(getMarcacionIcon(row.tipo, hasMarcacionAttachments(marcacionId)));
+}
+
+async function fetchMarcacionAttachments(){
+  const baseCols = 'id,marcacion_id,nombre,archivo_url,mime_type,created_at';
+  const cols = attachmentsSupportsR2Key ? `${baseCols},archivo_r2_key` : baseCols;
+  const { data, error } = await supabase
+    .from('marcaciones_adjuntos')
+    .select(cols)
+    .order('created_at');
+  if (error && attachmentsSupportsR2Key && isMissingR2KeyError(error)){
+    console.warn('[Adjuntos] El esquema no incluye archivo_r2_key; usando solo archivo_url.');
+    attachmentsSupportsR2Key = false;
+    return fetchMarcacionAttachments();
+  }
+  return { data, error };
+}
+
+function renderAttachmentsPanelFor(marcacionId){
+  if (!attachmentsPanel) return;
+  if (!marcacionId){
+    attachmentsPanel.classList.remove('show');
+    if (attachmentsListEl) attachmentsListEl.innerHTML = '';
+    if (attachmentsEmptyEl) attachmentsEmptyEl.style.display = 'block';
+    return;
+  }
+  const list = attachmentsByMarcacion.get(marcacionId) || [];
+  attachmentsPanel.classList.add('show');
+  if (attachmentsListEl){
+    attachmentsListEl.innerHTML = '';
+    for (const att of list){
+      const li = document.createElement('li');
+      li.className = 'attach-item';
+      const url = buildAttachmentSrc(att);
+      const name = esc(getAttachmentName(att));
+      const meta = att.mime_type ? `<span class="attach-meta">${esc(att.mime_type)}</span>` : '';
+      li.innerHTML = `${url ? `<a href="${url}" target="_blank" rel="noopener">📎 ${name}</a>` : `<span>${name}</span>`}${meta}`;
+      attachmentsListEl.appendChild(li);
+    }
+  }
+  if (attachmentsEmptyEl){
+    attachmentsEmptyEl.style.display = list.length ? 'none' : 'block';
+  }
+}
+
+function renderEditAttachments(marcacionId){
+  if (!emAttachListEl) return;
+  const list = attachmentsByMarcacion.get(marcacionId) || [];
+  emAttachListEl.innerHTML = '';
+  if (!list.length){
+    const li = document.createElement('li');
+    li.className = 'muted';
+    li.textContent = 'Sin adjuntos';
+    emAttachListEl.appendChild(li);
+    return;
+  }
+  for (const att of list){
+    const li = document.createElement('li');
+    li.className = 'attach-item';
+    const url = buildAttachmentSrc(att);
+    const name = esc(getAttachmentName(att));
+    const meta = att.mime_type ? `<span class="attach-meta">${esc(att.mime_type)}</span>` : '';
+    li.innerHTML = `${url ? `<a href="${url}" target="_blank" rel="noopener">📎 ${name}</a>` : `<span>${name}</span>`}${meta}` +
+      `<button type="button" class="attach-remove" data-attach-id="${att.id}" data-attach-mar="${att.marcacion_id}">Eliminar</button>`;
+    emAttachListEl.appendChild(li);
+  }
+}
+
+function setCurrentMarcacion(id){
+  currentMarcacionId = id || null;
+  renderAttachmentsPanelFor(currentMarcacionId);
+}
+
+emAttachListEl?.addEventListener('click', async (ev)=>{
+  const btn = ev.target.closest('.attach-remove');
+  if (!btn) return;
+  const attId = Number(btn.dataset.attachId);
+  const marcId = Number(btn.dataset.attachMar);
+  if (!attId || !marcId) return;
+  if (!confirm('¿Eliminar el adjunto seleccionado?')) return;
+  const msg = document.getElementById('editMarkMsg');
+  try{
+    beginBusy('Eliminando adjunto', 0);
+    await deleteAttachment(attId);
+    removeAttachmentFromCache(attId, marcId);
+    renderEditAttachments(marcId);
+    if (currentMarcacionId === marcId) renderAttachmentsPanelFor(marcId);
+    if (msg) msg.textContent = 'Adjunto eliminado';
+  }catch(err){
+    console.error(err);
+    if (msg) msg.textContent = 'Error: ' + err.message;
+  }finally{
+    endBusy();
+  }
+});
 
 /* Vista vacía (sin imagen) */
 function showEmptyViewer(){
@@ -183,15 +360,25 @@ function ensureGroupStruct(name){
 }
 
 /* ===== Marcaciones (cluster) ===== */
-function getMarcacionIcon(tipo){
+function buildMarcacionSVG({ fill, stroke, emoji, emojiColor = '#001219', hasAttachments }){
+  const badge = hasAttachments
+    ? `<circle cx="22" cy="6" r="6" fill="#a855f7" stroke="#6b21a8" stroke-width="1.5"/><text x="22" y="8.6" font-family="sans-serif" font-size="9" text-anchor="middle" fill="#f5f3ff">📎</text>`
+    : '';
+  const emojiLayer = emoji
+    ? `<text x="14" y="18" font-family="sans-serif" font-size="14" text-anchor="middle" fill="${emojiColor}">${emoji}</text>`
+    : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="${fill}" stroke="${stroke}" stroke-width="2"/>${badge}${emojiLayer}</svg>`;
+}
+
+function getMarcacionIcon(tipo, hasAttachments){
   if (tipo === '360') {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="#0ea5e9" stroke="#0c4a6e" stroke-width="2"/><text x="14" y="18" font-family="sans-serif" font-size="14" text-anchor="middle" fill="#001219">🕶️</text></svg>`;
+    const svg = buildMarcacionSVG({ fill:'#0ea5e9', stroke:'#0c4a6e', emoji:'🕶️', emojiColor:'#001219', hasAttachments });
     return L.divIcon({ html: svg, className: '', iconSize:[28,28], iconAnchor:[14,14] });
   } else if (tipo === 'foto') {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="#f59e0b" stroke="#78350f" stroke-width="2"/><text x="14" y="18" font-family="sans-serif" font-size="14" text-anchor="middle" fill="#1f1300">📷</text></svg>`;
+    const svg = buildMarcacionSVG({ fill:'#f59e0b', stroke:'#78350f', emoji:'📷', emojiColor:'#1f1300', hasAttachments });
     return L.divIcon({ html: svg, className: '', iconSize:[28,28], iconAnchor:[14,14] });
   }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="12" fill="#e5e7eb" stroke="#6b7280" stroke-width="2"/></svg>`;
+  const svg = buildMarcacionSVG({ fill:'#e5e7eb', stroke:'#6b7280', emoji:'', hasAttachments });
   return L.divIcon({ html: svg, className: '', iconSize:[28,28], iconAnchor:[14,14] });
 }
 
@@ -209,6 +396,7 @@ setTimeout(enhanceOverlayControlZoomButtons, 50);
 let allRows = [];            // fotos_recorrido
 let allMarcs = [];           // marcaciones
 const markerById = new Map();// recorrido: id -> circleMarker
+const marcacionMarkerById = new Map();
 let routeLayerActive = null;
 
 const BASE_VERTEX_STYLE = { radius:7, weight:1.8, opacity:.95, fillOpacity:.95 };
@@ -313,26 +501,45 @@ window.__editRec = (id)=>{
 async function loadMarcaciones(){
   setStatus('Cargando marcaciones…');
   marcacionesCluster.clearLayers();
-  const { data, error } = await supabase
-    .from('marcaciones')
-    .select('id,nombre,descripcion,lat,lng,tipo,foto_url,foto_r2_key,created_at')
-    .order('id');
-  if(error){ console.error(error); setStatus('Error cargando marcaciones'); return; }
-  allMarcs = data||[];
+  marcacionMarkerById.clear();
+  const [marcsRes, attachRes] = await Promise.all([
+    supabase
+      .from('marcaciones')
+      .select('id,nombre,descripcion,lat,lng,tipo,foto_url,foto_r2_key,created_at')
+      .order('id'),
+    fetchMarcacionAttachments()
+  ]);
+  if (marcsRes.error){
+    console.error(marcsRes.error);
+    setStatus('Error cargando marcaciones');
+    return;
+  }
+  if (attachRes.error){
+    console.error('Error cargando adjuntos', attachRes.error);
+    setAttachmentsCache([]);
+  } else {
+    setAttachmentsCache(attachRes.data || []);
+  }
+  allMarcs = marcsRes.data || [];
   for(const row of allMarcs){ addMarcacionMarker(row); }
   setStatus(`Marcaciones: ${allMarcs.length}`);
   enhanceOverlayControlZoomButtons();
+  if (currentMarcacionId && !allMarcs.some(x=>x.id===currentMarcacionId)){
+    currentMarcacionId = null;
+  }
+  renderAttachmentsPanelFor(currentMarcacionId);
 }
 
 function addMarcacionMarker(row){
   const lat=Number(row.lat), lng=Number(row.lng); if(!Number.isFinite(lat)||!Number.isFinite(lng)) return;
-  const icon=getMarcacionIcon(row.tipo);
+  const icon=getMarcacionIcon(row.tipo, hasMarcacionAttachments(row.id));
   const html = `<b>${esc(row.nombre ?? 'Sin nombre')}</b>${row.descripcion? `<br><em>${esc(row.descripcion)}</em>`:''}
                 <br><small>${esc(row.tipo||'sin imagen')}</small>
                 <br><small>id: ${row.id} · ${lat.toFixed(6)}, ${lng.toFixed(6)}</small>
                 <div style="margin-top:6px"><button class="ghost" onclick="window.__editMark(${row.id});return false;">✎ Editar</button></div>`;
   const m=L.marker([lat,lng],{icon}).bindPopup(html);
   m.on('click', async ()=>{
+    setCurrentMarcacion(row.id);
     document.getElementById('viewerTitle').textContent = `Marcación · ${row.nombre}`;
     if (row.tipo === '360' && (row.foto_r2_key || row.foto_url)){
       await open360ForMarcacion(row);
@@ -343,6 +550,7 @@ function addMarcacionMarker(row){
     }
   });
   marcacionesCluster.addLayer(m);
+  marcacionMarkerById.set(row.id, m);
   return m;
 }
 window.__editMark = (id)=>{
@@ -353,6 +561,9 @@ window.__editMark = (id)=>{
   document.getElementById('emDesc').value = r.descripcion || '';
   document.getElementById('emFile').value = '';
   document.getElementById('emRemove').checked = false;
+  const emAttachments = document.getElementById('emAttachments');
+  if (emAttachments) emAttachments.value = '';
+  renderEditAttachments(r.id);
   const prev = document.getElementById('emPreview');
   if (r.foto_r2_key || r.foto_url){
     const src = buildSrc(r);
@@ -572,6 +783,7 @@ function onRecClick(row, cm){
   if (idx !== -1) { playIdx = idx; updateNowInfo(row, idx, obj.rows.length); }
   map.panTo(cm.getLatLng());
   highlightVertex(cm);
+  setCurrentMarcacion(null);
   if (row.foto_url || row.foto_r2_key) {
     open360ForRow(row, /*fallbackToPhoto=*/true, /*suppress=*/false);
   } else {
@@ -816,6 +1028,7 @@ function showAt(i, openPopup){
   const m=markerById.get(row.id);
   if(m){ map.panTo(m.getLatLng()); if (openPopup) m.openPopup(); highlightVertex(m); }
   playIdx=i; updateNowInfo(row, i, arr.length);
+  setCurrentMarcacion(null);
   if (row.foto_url || row.foto_r2_key){
     // Durante recorrido, suppressViewerLoading=true → no mostrar overlay por imagen
     open360ForRow(row, /*fallbackToPhoto=*/true, /*suppress=*/suppressViewerLoading);
@@ -881,6 +1094,70 @@ async function uploadToR2(workerUrl, keyPath, file){
   const res=await fetch(workerUrl.replace(/\/$/,'') + '/upload', {method:'POST', body:form});
   if(!res.ok){ const t=await res.text(); throw new Error(`R2 upload HTTP ${res.status}: ${t}`); }
   return res.json(); // { url, key }
+}
+async function insertAttachmentRow(payload){
+  const url = SUPABASE_URL.replace(/\/$/,'') + '/rest/v1/marcaciones_adjuntos?select=*';
+  const bodyPayload = attachmentsSupportsR2Key ? payload : (()=>{ const clone={...payload}; delete clone.archivo_r2_key; return clone; })();
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    },
+    body: JSON.stringify([bodyPayload])
+  });
+  if (!res.ok){
+    const t = await res.text();
+    if (attachmentsSupportsR2Key && isMissingR2KeyError(t)){
+      console.warn('[Adjuntos] Insert falló por falta de archivo_r2_key; reintentando sin la columna.');
+      attachmentsSupportsR2Key = false;
+      return insertAttachmentRow(payload);
+    }
+    throw new Error(`Insert adjunto HTTP ${res.status}: ${t}`);
+  }
+  const data = await res.json();
+  const row = data?.[0];
+  if (row && !attachmentsSupportsR2Key && payload.archivo_r2_key && !row.archivo_r2_key){
+    row.archivo_r2_key = payload.archivo_r2_key;
+  }
+  return row;
+}
+async function uploadAttachmentsForMarcacion(marcacionId, files, onProgress){
+  const results = [];
+  const total = files.length;
+  for (let i=0; i<files.length; i++){
+    if (currentBusy.cancel) throw new Error('Cancelado por el usuario');
+    const file = files[i];
+    const originalName = file.name || `adjunto_${i+1}`;
+    const ext = (originalName.match(/\.[^.]+$/)?.[0] || '').toLowerCase();
+    const baseNameRaw = originalName.replace(/\.[^.]+$/, '');
+    const baseName = sanitizePath(baseNameRaw) || 'adjunto';
+    const keyPath = `adjuntos/${marcacionId}/${Date.now()}_${i+1}_${baseName}${ext}`;
+    const up = await uploadToR2(R2_UPLOADER_URL, keyPath, file);
+    const row = await insertAttachmentRow({
+      marcacion_id: marcacionId,
+      nombre: originalName,
+      archivo_url: up.url,
+      archivo_r2_key: up.key,
+      mime_type: file.type || null
+    });
+    if (row) results.push(row);
+    onProgress?.(i+1, total, originalName);
+  }
+  return results;
+}
+async function deleteAttachment(attId){
+  const url = SUPABASE_URL.replace(/\/$/,'') + `/rest/v1/marcaciones_adjuntos?id=eq.${encodeURIComponent(attId)}`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+    }
+  });
+  if (!res.ok){ const t = await res.text(); throw new Error(`Eliminar adjunto HTTP ${res.status}: ${t}`); }
 }
 async function updateFotoUrl(table,rowId,url,key){
   const endpoint=SUPABASE_URL.replace(/\/$/,'' ) + `/rest/v1/${table}?id=eq.`+encodeURIComponent(rowId);
@@ -999,6 +1276,8 @@ map.on('click', (e)=>{
   document.getElementById('mDesc').value = 'Añadido desde el mapa';
   document.getElementById('mTipo').value = '';
   document.getElementById('mFile').value = '';
+  const mAttachments = document.getElementById('mAttachments');
+  if (mAttachments) mAttachments.value = '';
   document.getElementById('markMsg').textContent = '';
   openModal(markModal);
 });
@@ -1010,20 +1289,31 @@ document.getElementById('markForm').addEventListener('submit', async (e)=>{
   const lat=Number(document.getElementById('mLat').value);
   const lng=Number(document.getElementById('mLng').value);
   const file=document.getElementById('mFile').files[0];
+  const attachments = Array.from(document.getElementById('mAttachments')?.files || []);
   const msg=document.getElementById('markMsg');
   if(!nombre || !Number.isFinite(lat) || !Number.isFinite(lng)){ msg.textContent='Complete nombre y coordenadas válidas.'; return; }
+  const uploadsTotal = attachments.length + (file ? 1 : 0);
+  let busyStarted = false;
   try{
-    if (file) beginBusy('Subiendo imagen', 100);
+    if (uploadsTotal > 0){
+      beginBusy('Guardando marcación', uploadsTotal);
+      busyStarted = true;
+    }
 
+    let doneUploads = 0;
     let foto_url=null, foto_r2_key=null;
     if (file){
-      setBusyMsg('Subiendo imagen…');
+      if (busyStarted) setBusyMsg('Subiendo imagen…');
       const ext=(file.name.match(/\.[^.]+$/)?.[0]||'.jpg').toLowerCase();
-      const keyPath=`marcaciones/${Date.now()}_${sanitizePath(file.name.replace(/\.[^.]+$/,''))}${ext}`;
+      const baseNameRaw=file.name.replace(/\.[^.]+$/,'');
+      const safeBase=sanitizePath(baseNameRaw)||'imagen';
+      const keyPath=`marcaciones/${Date.now()}_${safeBase}${ext}`;
       const up=await uploadToR2(R2_UPLOADER_URL, keyPath, file);
       foto_url=up.url; foto_r2_key=up.key;
-      setBusyProgress(100, 100, 'Imagen subida');
+      doneUploads++;
+      if (busyStarted && uploadsTotal){ setBusyProgress(doneUploads, uploadsTotal, 'Imagen subida'); }
     }
+
     const ewkt=`SRID=4326;POINT(${lng} ${lat})`;
     const body=[{ nombre, descripcion:descripcion||null, lat, lng, geom:ewkt, tipo:(file?tipo:null), foto_url, foto_r2_key }];
     const url=SUPABASE_URL.replace(/\/$/,'') + '/rest/v1/marcaciones?select=*';
@@ -1034,9 +1324,22 @@ document.getElementById('markForm').addEventListener('submit', async (e)=>{
     const m=addMarcacionMarker(row);
     if(m){ map.panTo(m.getLatLng()); m.openPopup(); }
 
+    if (attachments.length){
+      const baseDone = doneUploads;
+      const uploaded = await uploadAttachmentsForMarcacion(row.id, attachments, (done, total)=>{
+        if (busyStarted){
+          setBusyMsg(`Subiendo adjuntos (${done}/${total})…`);
+          if (uploadsTotal) setBusyProgress(baseDone + done, uploadsTotal, `Adjuntos ${done}/${total}`);
+        }
+      });
+      doneUploads += attachments.length;
+      appendAttachmentsToCache(uploaded);
+    }
+
+    setCurrentMarcacion(row.id);
     document.getElementById('viewerTitle').textContent = `Marcación · ${row.nombre}`;
-    if (file){
-      if (tipo==='360'){ await open360ForMarcacion(row); }
+    if (row.foto_r2_key || row.foto_url){
+      if (row.tipo === '360'){ await open360ForMarcacion(row); }
       else { await openPhotoForMarcacion(row); }
     } else {
       showEmptyViewer();
@@ -1046,7 +1349,7 @@ document.getElementById('markForm').addEventListener('submit', async (e)=>{
     closeModal(markModal);
     markMode=false; document.getElementById('btnMark').textContent='➕ Marcar punto'; map._container.style.cursor='';
   }catch(err){ console.error(err); msg.textContent='Error: '+err.message; }
-  finally{ if (busyBadge && busyBadge.style.display!=='none') endBusy(); }
+  finally{ if (busyStarted) endBusy(); }
 });
 
 /* ===== Editar marcación ===== */
@@ -1058,12 +1361,15 @@ document.getElementById('editMarkForm').addEventListener('submit', async (e)=>{
   const descripcion = document.getElementById('emDesc').value.trim();
   const file  = document.getElementById('emFile').files[0];
   const remove = document.getElementById('emRemove').checked;
+  const newAttachments = Array.from(document.getElementById('emAttachments')?.files || []);
   const msg  = document.getElementById('editMarkMsg');
 
   if(!nombre){ msg.textContent='Indica un nombre.'; return; }
 
   try{
-    if (file) beginBusy('Subiendo imagen', 100); else beginBusy('Guardando cambios', 0);
+    const totalUploads = (file ? 1 : 0) + newAttachments.length;
+    beginBusy('Guardando cambios', totalUploads);
+    let doneUploads = 0;
 
     const patch = { nombre, descripcion: descripcion || null };
 
@@ -1080,7 +1386,8 @@ document.getElementById('editMarkForm').addEventListener('submit', async (e)=>{
         const up = await uploadToR2(R2_UPLOADER_URL, keyPath, file);
         patch.foto_url = up.url;
         patch.foto_r2_key = up.key;
-        setBusyProgress(100, 100, 'Imagen subida');
+        doneUploads++;
+        if (totalUploads) setBusyProgress(doneUploads, totalUploads, 'Imagen subida');
       }
     }
 
@@ -1101,18 +1408,32 @@ document.getElementById('editMarkForm').addEventListener('submit', async (e)=>{
 
     const i = allMarcs.findIndex(x=>x.id===id);
     if (i>=0) allMarcs[i] = row;
+
+    if (newAttachments.length){
+      const baseDone = doneUploads;
+      const uploaded = await uploadAttachmentsForMarcacion(id, newAttachments, (done, total)=>{
+        setBusyMsg(`Subiendo adjuntos (${done}/${total})…`);
+        if (totalUploads) setBusyProgress(baseDone + done, totalUploads, `Adjuntos ${done}/${total}`);
+      });
+      doneUploads += newAttachments.length;
+      appendAttachmentsToCache(uploaded);
+    }
+
     await loadMarcaciones();
 
     msg.textContent = '✅ Guardado';
     closeModal(document.getElementById('editMarkModal'));
 
-    document.getElementById('viewerTitle').textContent = `Marcación · ${row.nombre}`;
-    if (row.foto_r2_key || row.foto_url){
-      if (row.tipo === '360'){ await open360ForMarcacion(row); }
-      else { await openPhotoForMarcacion(row); }
+    const updated = allMarcs.find(x=>x.id===id) || row;
+    document.getElementById('viewerTitle').textContent = `Marcación · ${updated.nombre}`;
+    if (updated.foto_r2_key || updated.foto_url){
+      if (updated.tipo === '360'){ await open360ForMarcacion(updated); }
+      else { await openPhotoForMarcacion(updated); }
     } else {
       showEmptyViewer();
     }
+    setCurrentMarcacion(updated.id);
+    renderEditAttachments(updated.id);
 
   }catch(err){
     console.error(err);
