@@ -25,6 +25,7 @@ const emAttachListEl = document.getElementById('emAttachList');
 let currentBusy = { active:false, label:'', cancel:false, total:0, done:0 };
 let currentMarcacionId = null;
 let attachmentsByMarcacion = new Map();
+let attachmentsSupportsR2Key = true;
 
 function beginBusy(label, total=0){
   currentBusy = { active:true, label, cancel:false, total, done:0 };
@@ -149,6 +150,30 @@ function removeAttachmentFromCache(attId, marcacionId){
   if (!attachmentsByMarcacion.has(marcacionId)) return;
   const list = (attachmentsByMarcacion.get(marcacionId) || []).filter(att => att.id !== attId);
   attachmentsByMarcacion.set(marcacionId, list);
+}
+
+function isMissingR2KeyError(err){
+  if (!err) return false;
+  if (typeof err === 'string'){
+    return err.toLowerCase().includes('archivo_r2_key');
+  }
+  const parts = [err.message, err.details, err.hint].filter(Boolean).join(' ').toLowerCase();
+  return parts.includes('archivo_r2_key');
+}
+
+async function fetchMarcacionAttachments(){
+  const baseCols = 'id,marcacion_id,nombre,archivo_url,mime_type,created_at';
+  const cols = attachmentsSupportsR2Key ? `${baseCols},archivo_r2_key` : baseCols;
+  const { data, error } = await supabase
+    .from('marcaciones_adjuntos')
+    .select(cols)
+    .order('created_at');
+  if (error && attachmentsSupportsR2Key && isMissingR2KeyError(error)){
+    console.warn('[Adjuntos] El esquema no incluye archivo_r2_key; usando solo archivo_url.');
+    attachmentsSupportsR2Key = false;
+    return fetchMarcacionAttachments();
+  }
+  return { data, error };
 }
 
 function renderAttachmentsPanelFor(marcacionId){
@@ -450,10 +475,7 @@ async function loadMarcaciones(){
       .from('marcaciones')
       .select('id,nombre,descripcion,lat,lng,tipo,foto_url,foto_r2_key,created_at')
       .order('id'),
-    supabase
-      .from('marcaciones_adjuntos')
-      .select('id,marcacion_id,nombre,archivo_url,archivo_r2_key,mime_type,created_at')
-      .order('created_at')
+    fetchMarcacionAttachments()
   ]);
   if (marcsRes.error){
     console.error(marcsRes.error);
@@ -1042,6 +1064,7 @@ async function uploadToR2(workerUrl, keyPath, file){
 }
 async function insertAttachmentRow(payload){
   const url = SUPABASE_URL.replace(/\/$/,'') + '/rest/v1/marcaciones_adjuntos?select=*';
+  const bodyPayload = attachmentsSupportsR2Key ? payload : (()=>{ const clone={...payload}; delete clone.archivo_r2_key; return clone; })();
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -1050,11 +1073,23 @@ async function insertAttachmentRow(payload){
       'Content-Type': 'application/json',
       'Prefer': 'return=representation'
     },
-    body: JSON.stringify([payload])
+    body: JSON.stringify([bodyPayload])
   });
-  if (!res.ok){ const t = await res.text(); throw new Error(`Insert adjunto HTTP ${res.status}: ${t}`); }
+  if (!res.ok){
+    const t = await res.text();
+    if (attachmentsSupportsR2Key && isMissingR2KeyError(t)){
+      console.warn('[Adjuntos] Insert falló por falta de archivo_r2_key; reintentando sin la columna.');
+      attachmentsSupportsR2Key = false;
+      return insertAttachmentRow(payload);
+    }
+    throw new Error(`Insert adjunto HTTP ${res.status}: ${t}`);
+  }
   const data = await res.json();
-  return data?.[0];
+  const row = data?.[0];
+  if (row && !attachmentsSupportsR2Key && payload.archivo_r2_key && !row.archivo_r2_key){
+    row.archivo_r2_key = payload.archivo_r2_key;
+  }
+  return row;
 }
 async function uploadAttachmentsForMarcacion(marcacionId, files, onProgress){
   const results = [];

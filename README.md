@@ -24,6 +24,17 @@ create index if not exists marcaciones_adjuntos_marcacion_id_idx
   on public.marcaciones_adjuntos (marcacion_id);
 ```
 
+#### Si ya tenías la tabla creada
+
+El error `Could not find the 'archivo_r2_key' column of 'marcaciones_adjuntos' in the schema cache` indica que la tabla se creó antes de agregar la columna usada para las claves de R2. Ejecuta estas instrucciones desde la consola SQL de Supabase para actualizarla y forzar la recarga del esquema del API REST:
+
+```sql
+alter table public.marcaciones_adjuntos
+  add column if not exists archivo_r2_key text;
+
+notify pgrst, 'reload schema';
+```
+
 Si tienes RLS activo, replica para esta tabla las mismas políticas que utilizas en `marcaciones` para lectura/escritura mediante la clave anónima.
 
 ### Estructura en R2
