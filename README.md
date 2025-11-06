@@ -6,7 +6,8 @@ El visor ahora permite subir archivos adjuntos (PDF, Excel, DOCX, etc.) por cada
 
 ### Requisitos en la base de datos (Supabase)
 
-Crea la tabla `marcacion_adjuntos` con la siguiente estructura (ajusta el esquema si no usas `public`):
+Crea la tabla `marcacion_adjuntos` con la siguiente estructura (ajusta el esquema si no usas `public`). Puedes ejecutar el
+script `sql/marcacion_adjuntos.sql` directamente desde la consola SQL de Supabase o cualquier cliente Postgres:
 
 ```sql
 create table public.marcacion_adjuntos (
