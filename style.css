@@ -133,11 +133,24 @@ button, input, select, textarea{
   position:relative; background:#0f172a; color:#e5e7eb; border:1px solid #334155;
   border-radius:12px; box-shadow:0 10px 40px rgba(0,0,0,.35); width:min(92vw,580px); padding:14px;
 }
-.modal .content.pdf-modal{ width:min(96vw,920px); max-height:92vh; display:flex; flex-direction:column; gap:14px; }
+.modal .content.pdf-modal{
+  width:min(98vw,1200px);
+  max-height:96vh;
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
 .pdf-modal-header{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .pdf-modal-close{ padding:4px 10px; font-size:18px; line-height:1; }
 .pdf-modal-actions{ display:flex; justify-content:flex-end; gap:8px; }
-.pdf-modal-frame{ flex:1; min-height:60vh; border:1px solid #1f2a44; border-radius:8px; overflow:hidden; background:#020617; }
+.pdf-modal-frame{
+  flex:1;
+  min-height:72vh;
+  border:1px solid #1f2a44;
+  border-radius:8px;
+  overflow:hidden;
+  background:#020617;
+}
 .pdf-modal-frame iframe{ width:100%; height:100%; display:block; }
 .modal h3{ margin:0 0 10px; font-size:16px; color:#cbd5e1 }
 .form-row{ display:grid; grid-template-columns: 1fr; gap:10px; margin-bottom:12px; }
