@@ -181,7 +181,8 @@ function openPdfPreview(att, url){
     const fileName = getAttachmentName(att) || 'archivo.pdf';
     pdfModalDownload.download = fileName;
   }
-  pdfModalFrame.src = url;
+  pdfModalFrame.src = url.includes('#') ? url : `${url}#zoom=page-width`;
+
   openModal(pdfModal);
 }
 
