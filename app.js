@@ -21,10 +21,15 @@ const attachmentsPanel = document.getElementById('attachmentsPanel');
 const attachmentsListEl = document.getElementById('attachmentsList');
 const attachmentsEmptyEl = document.getElementById('attachmentsEmpty');
 const emAttachListEl = document.getElementById('emAttachList');
+const pdfModal = document.getElementById('pdfModal');
+const pdfModalTitle = document.getElementById('pdfModalTitle');
+const pdfModalDownload = document.getElementById('pdfModalDownload');
+const pdfModalFrame = document.getElementById('pdfModalFrame');
 
 let currentBusy = { active:false, label:'', cancel:false, total:0, done:0 };
 let currentMarcacionId = null;
 let attachmentsByMarcacion = new Map();
+let attachmentsById = new Map();
 let attachmentsSupportsR2Key = true;
 
 function beginBusy(label, total=0){
@@ -141,12 +146,78 @@ function buildAttachmentSrc(att){
   return '';
 }
 
+function isPdfAttachment(att){
+  if (!att) return false;
+  const mime = String(att.mime_type || '').toLowerCase();
+  if (mime.includes('pdf')) return true;
+  const name = String(getAttachmentName(att) || '').toLowerCase();
+  return name.endsWith('.pdf');
+}
+
+function buildAttachmentLinkHTML(att){
+  const url = buildAttachmentSrc(att);
+  const fullName = getAttachmentName(att);
+  const displayName = esc(getAttachmentDisplayName(att));
+  const titleAttr = fullName ? ` title="${esc(fullName)}"` : '';
+  if (!url){
+    return `<span${titleAttr}>${displayName}</span>`;
+  }
+  const isPdf = isPdfAttachment(att);
+  const handler = isPdf ? ` onclick="return window.__openAttachment(event, ${att.id});"` : '';
+  const targetRel = isPdf ? '' : ' target="_blank" rel="noopener"';
+  return `<a href="${url}"${targetRel}${titleAttr}${handler}>📎 ${displayName}</a>`;
+}
+
+function openPdfPreview(att, url){
+  if (!pdfModal || !pdfModalFrame || !url){
+    window.open(url, '_blank', 'noopener');
+    return;
+  }
+  if (pdfModalTitle){
+    pdfModalTitle.textContent = getAttachmentName(att) || 'Archivo PDF';
+  }
+  if (pdfModalDownload){
+    pdfModalDownload.href = url;
+    const fileName = getAttachmentName(att) || 'archivo.pdf';
+    pdfModalDownload.download = fileName;
+  }
+  pdfModalFrame.src = url;
+  openModal(pdfModal);
+}
+
+window.__openAttachment = (ev, attId)=>{
+  const att = attachmentsById.get(Number(attId));
+  if (!att){
+    return true;
+  }
+  const url = buildAttachmentSrc(att);
+  if (!url){
+    return false;
+  }
+  const allowDefault = ev && (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button === 1);
+  if (isPdfAttachment(att) && !allowDefault){
+    ev?.preventDefault?.();
+    ev?.stopPropagation?.();
+    openPdfPreview(att, url);
+    return false;
+  }
+  return true;
+};
+
+pdfModal?.addEventListener('click', (ev)=>{
+  if (ev.target.classList?.contains('backdrop') || ev.target.closest('[data-close]')){
+    if (pdfModalFrame) pdfModalFrame.src = '';
+  }
+});
+
 function setAttachmentsCache(rows){
   attachmentsByMarcacion = new Map();
+  attachmentsById = new Map();
   for (const att of rows || []){
     const list = attachmentsByMarcacion.get(att.marcacion_id) || [];
     list.push(att);
     attachmentsByMarcacion.set(att.marcacion_id, list);
+    if (att.id != null) attachmentsById.set(Number(att.id), att);
   }
   for (const list of attachmentsByMarcacion.values()){
     list.sort((a,b)=> new Date(a.created_at||0) - new Date(b.created_at||0));
@@ -164,6 +235,7 @@ function appendAttachmentsToCache(rows){
     list.push(att);
     list.sort((a,b)=> new Date(a.created_at||0) - new Date(b.created_at||0));
     attachmentsByMarcacion.set(att.marcacion_id, list);
+    if (att.id != null) attachmentsById.set(Number(att.id), att);
     touched.add(att.marcacion_id);
   }
   for (const id of touched){
@@ -177,6 +249,7 @@ function removeAttachmentFromCache(attId, marcacionId){
   if (!attachmentsByMarcacion.has(marcacionId)) return;
   const list = (attachmentsByMarcacion.get(marcacionId) || []).filter(att => att.id !== attId);
   attachmentsByMarcacion.set(marcacionId, list);
+  attachmentsById.delete(Number(attId));
   refreshMarcacionMarkerIcon(marcacionId);
   refreshMarcacionMarkerPopup(marcacionId);
   if (currentMarcacionId === marcacionId) renderAttachmentsPanelFor(marcacionId);
@@ -199,16 +272,7 @@ function buildPopupAttachmentsHTML(list){
   if (!Array.isArray(list) || !list.length){
     return '<div class="popup-attachments muted">Sin adjuntos</div>';
   }
-  const items = list.map((att)=>{
-    const url = buildAttachmentSrc(att);
-    const fullName = getAttachmentName(att);
-    const displayName = esc(getAttachmentDisplayName(att));
-    const titleAttr = fullName ? ` title="${esc(fullName)}"` : '';
-    const link = url
-      ? `<a href="${url}" target="_blank" rel="noopener"${titleAttr}>📎 ${displayName}</a>`
-      : `<span${titleAttr}>${displayName}</span>`;
-    return `<li class="attach-item">${link}</li>`;
-  }).join('');
+  const items = list.map((att)=> `<li class="attach-item">${buildAttachmentLinkHTML(att)}</li>`).join('');
   return `<ul class="popup-attachments">${items}</ul>`;
 }
 
@@ -267,13 +331,7 @@ function renderAttachmentsPanelFor(marcacionId){
     for (const att of list){
       const li = document.createElement('li');
       li.className = 'attach-item';
-      const url = buildAttachmentSrc(att);
-      const fullName = getAttachmentName(att);
-      const name = esc(getAttachmentDisplayName(att));
-      const titleAttr = fullName ? ` title="${esc(fullName)}"` : '';
-      li.innerHTML = url
-        ? `<a href="${url}" target="_blank" rel="noopener"${titleAttr}>📎 ${name}</a>`
-        : `<span${titleAttr}>${name}</span>`;
+      li.innerHTML = buildAttachmentLinkHTML(att);
       attachmentsListEl.appendChild(li);
     }
   }
@@ -296,13 +354,7 @@ function renderEditAttachments(marcacionId){
   for (const att of list){
     const li = document.createElement('li');
     li.className = 'attach-item';
-    const url = buildAttachmentSrc(att);
-    const fullName = getAttachmentName(att);
-    const name = esc(getAttachmentDisplayName(att));
-    const titleAttr = fullName ? ` title="${esc(fullName)}"` : '';
-    li.innerHTML = (url
-      ? `<a href="${url}" target="_blank" rel="noopener"${titleAttr}>📎 ${name}</a>`
-      : `<span${titleAttr}>${name}</span>`)
+    li.innerHTML = buildAttachmentLinkHTML(att)
       +
       `<button type="button" class="attach-remove" data-attach-id="${att.id}" data-attach-mar="${att.marcacion_id}">Eliminar</button>`;
     emAttachListEl.appendChild(li);

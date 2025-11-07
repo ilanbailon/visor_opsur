@@ -276,6 +276,23 @@
     </div>
   </div>
 
+  <!-- Modal visor PDF -->
+  <div id="pdfModal" class="modal" aria-hidden="true">
+    <div class="backdrop" data-close></div>
+    <div class="content pdf-modal">
+      <div class="pdf-modal-header">
+        <h3 id="pdfModalTitle">Vista previa PDF</h3>
+        <button type="button" class="ghost pdf-modal-close" data-close aria-label="Cerrar">✕</button>
+      </div>
+      <div class="pdf-modal-actions">
+        <a id="pdfModalDownload" class="pill" href="#" target="_blank" rel="noopener">⬇️ Descargar</a>
+      </div>
+      <div class="pdf-modal-frame">
+        <iframe id="pdfModalFrame" title="Vista previa PDF" frameborder="0"></iframe>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal editar recorrido -->
   <div id="editRecModal" class="modal" aria-hidden="true">
     <div class="backdrop" data-close></div>
