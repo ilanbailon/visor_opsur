@@ -134,11 +134,11 @@ button, input, select, textarea{
   border-radius:12px; box-shadow:0 10px 40px rgba(0,0,0,.35); width:min(92vw,580px); padding:14px;
 }
 .modal .content.pdf-modal{
-+  width:min(98vw,1200px);
-+  height:96vh;             /* <- clave: el contenedor ahora tiene alto fijo */
-+  display:flex;
-+  flex-direction:column;
-+  gap:14px;
+width:min(98vw,1200px);
+height:96vh;             /* <- clave: el contenedor ahora tiene alto fijo */
+display:flex;
+flex-direction:column;
+gap:14px;
 }
 .pdf-modal-header{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .pdf-modal-close{ padding:4px 10px; font-size:18px; line-height:1; }
