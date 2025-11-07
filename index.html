@@ -80,6 +80,11 @@
           <span id="viewerLoadingText">Cargando imagen…</span>
         </div>
       </div>
+      <div id="attachmentsPanel" aria-live="polite">
+        <div class="panel-title">Adjuntos</div>
+        <ul id="attachmentsList" class="attach-list"></ul>
+        <div id="attachmentsEmpty" class="muted">Sin adjuntos para esta marcación.</div>
+      </div>
     </section>
   </div>
 
@@ -165,6 +170,14 @@
           </div>
         </div>
 
+        <div class="form-row">
+          <div>
+            <div class="muted">Adjuntos (PDF, Excel, etc.)</div>
+            <input type="file" id="mAttachments" multiple>
+            <div class="muted" style="margin-top:4px">Puedes seleccionar varios archivos.</div>
+          </div>
+        </div>
+
         <div class="form-row cols-2">
           <div>
             <div class="muted">Lat *</div>
@@ -234,6 +247,21 @@
 
         <div class="form-row">
           <div>
+            <div class="muted">Adjuntos actuales</div>
+            <ul id="emAttachList" class="attach-list"></ul>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <div class="muted">Agregar nuevos adjuntos</div>
+            <input type="file" id="emAttachments" multiple>
+            <div class="muted" style="margin-top:4px">Puedes seleccionar varios archivos.</div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div>
             <div class="muted">Descripción</div>
             <textarea id="emDesc"></textarea>
           </div>
@@ -245,6 +273,23 @@
         </div>
       </form>
       <div id="editMarkMsg" class="muted" style="margin-top:6px"></div>
+    </div>
+  </div>
+
+  <!-- Modal visor PDF -->
+  <div id="pdfModal" class="modal" aria-hidden="true">
+    <div class="backdrop" data-close></div>
+    <div class="content pdf-modal">
+      <div class="pdf-modal-header">
+        <h3 id="pdfModalTitle">Vista previa PDF</h3>
+        <button type="button" class="ghost pdf-modal-close" data-close aria-label="Cerrar">✕</button>
+      </div>
+      <div class="pdf-modal-actions">
+        <a id="pdfModalDownload" class="pill" href="#" target="_blank" rel="noopener">⬇️ Descargar</a>
+      </div>
+      <div class="pdf-modal-frame">
+        <iframe id="pdfModalFrame" title="Vista previa PDF" frameborder="0"></iframe>
+      </div>
     </div>
   </div>
 
